@@ -65,8 +65,20 @@ interface InstructionEditor {
   cancellationPreference: string;
 }
 
+interface InstructionProposalRecommendation {
+  name: string;
+  rate: string;
+  notes: string;
+}
+
 interface InstructionProposal {
   summary: string;
+  conversationalReply?: string;
+  intent?: string;
+  category?: MemberWorkspaceCategory;
+  requirements?: string;
+  suggestedBudget?: string | null;
+  recommendations?: InstructionProposalRecommendation[];
   maximumTotal: string | null;
   validFromLocal: string | null;
   validUntilLocal: string | null;
@@ -470,6 +482,9 @@ export class AppComponent implements OnInit {
       if (reply) this.instructionAssistantTurns.update((turns) => [...turns, { questions: previousProposal?.questions ?? [], reply }].slice(-6));
       this.instructionAssistantReply = '';
       this.instructionProposal.set(proposal);
+      if (proposal.category && this.memberCategories.some((c) => c.id === proposal.category)) {
+        this.instructionMemberCategory = proposal.category;
+      }
       this.instructionMaximumTotal = proposal.maximumTotal ?? '';
       this.instructionValidFromLocal = proposal.validFromLocal ?? '';
       this.instructionValidUntilLocal = proposal.validUntilLocal ?? '';

@@ -129,30 +129,93 @@
                 }
 
                 @if (instructionProposal(); as proposal) {
-                  <section class="assistant-proposal" aria-labelledby="assistant-proposal-title">
-                    <div class="assistant-proposal-header">
-                      <span class="assistant-badge">Assistant suggestions</span>
-                      <button type="button" class="dash-text-button" (click)="clearAssistantProposal()">Clear</button>
+                  <!-- 1. Assistant Concierge Natural Language Bubble -->
+                  <div class="chat-message assistant assistant-concierge-msg">
+                    <p>{{ proposal.conversationalReply || proposal.summary }}</p>
+                  </div>
+
+                  <!-- 2. Extracted Structured Entity Card (Matching user screenshot) -->
+                  <div class="assistant-entity-card">
+                    <div class="entity-card-header">
+                      <span class="entity-card-badge">✦ Extracted Need & Intent</span>
+                      <span class="entity-category-chip">{{ memberCategoryLabel(instructionMemberCategory) }}</span>
                     </div>
-                    <p>{{ proposal.summary }}</p>
-                    <div class="assistant-proposal-fields">
-                      <label>Maximum ({{ accountSettings()?.currency || 'account currency' }})
-                        <input type="text" inputmode="decimal" [ngModel]="instructionMaximumTotal" (ngModelChange)="updateAssistantProposalField('maximumTotal', $event)" name="assistantMaximum" placeholder="No amount found" />
-                      </label>
-                      <label>Starts at ({{ accountSettings()?.timezone || 'account timezone' }})
-                        <input type="datetime-local" [ngModel]="instructionValidFromLocal" (ngModelChange)="updateAssistantProposalField('validFromLocal', $event)" name="assistantStart" />
-                      </label>
-                      <label>Deadline ({{ accountSettings()?.timezone || 'account timezone' }})
-                        <input type="datetime-local" [ngModel]="instructionValidUntilLocal" (ngModelChange)="updateAssistantProposalField('validUntilLocal', $event)" name="assistantDeadline" />
-                      </label>
-                    </div>
-                    @if (proposal.questions.length) {
-                      <div class="proposal-questions">
-                        <strong>Needs your input</strong>
-                        <ul>@for (question of proposal.questions; track $index) {<li>{{ question }}</li>}</ul>
+                    <div class="entity-card-grid">
+                      @if (proposal.intent) {
+                        <div class="entity-card-item">
+                          <small>Intent</small>
+                          <strong>{{ proposal.intent.replace('_', ' ') }}</strong>
+                        </div>
+                      }
+                      <div class="entity-card-item">
+                        <small>Budget / Pricing</small>
+                        <strong>{{ instructionMaximumTotal ? (instructionMaximumTotal + ' ' + (accountSettings()?.currency || 'USD')) : (proposal.suggestedBudget || 'Market rate discovery') }}</strong>
                       </div>
-                    }
-                  </section>
+                      @if (proposal.requirements) {
+                        <div class="entity-card-item entity-card-full">
+                          <small>Requirements</small>
+                          <span>{{ proposal.requirements }}</span>
+                        </div>
+                      }
+                      @if (instructionValidFromLocal || instructionValidUntilLocal) {
+                        <div class="entity-card-item entity-card-full">
+                          <small>Timeline</small>
+                          <span>{{ instructionValidFromLocal || 'Anytime' }}{{ instructionValidUntilLocal ? ' → ' + instructionValidUntilLocal : '' }}</span>
+                        </div>
+                      }
+                    </div>
+                  </div>
+
+                  <!-- 3. Scouted Options & Candidate Leads -->
+                  @if (proposal.recommendations && proposal.recommendations.length > 0) {
+                    <div class="assistant-scouted-card">
+                      <div class="scouted-header">
+                        <span class="scouted-title">🔍 Scouted Options & Candidate Leads</span>
+                        <small>{{ proposal.recommendations.length }} candidates found</small>
+                      </div>
+                      <div class="scouted-list">
+                        @for (rec of proposal.recommendations; track $index) {
+                          <div class="scouted-item">
+                            <div class="scouted-top">
+                              <strong>{{ rec.name }}</strong>
+                              @if (rec.rate) { <span class="scouted-rate">{{ rec.rate }}</span> }
+                            </div>
+                            @if (rec.notes) { <p class="scouted-notes">{{ rec.notes }}</p> }
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  }
+
+                  <!-- 4. Follow-up Questions -->
+                  @if (proposal.questions && proposal.questions.length > 0) {
+                    <div class="assistant-questions-bubble">
+                      <strong>Follow-up questions:</strong>
+                      <ul>
+                        @for (q of proposal.questions; track $index) {
+                          <li>{{ q }}</li>
+                        }
+                      </ul>
+                      <small>Reply directly in the chat below to answer or refine.</small>
+                    </div>
+                  }
+
+                  <!-- 5. One-Tap Confirmation / Save Card -->
+                  <div class="instruction-confirm-card">
+                    <div class="confirm-info">
+                      <strong>Ready to save this instruction?</strong>
+                      <p>Appai will store this instruction and track matching providers under your {{ memberCategoryLabel(instructionMemberCategory) }} area.</p>
+                    </div>
+                    <div class="confirm-actions">
+                      <button
+                        class="dash-primary confirm-save-btn"
+                        type="button"
+                        (click)="saveInstructionDraft()"
+                        [disabled]="instructionSaving()">
+                        {{ instructionSaving() ? 'Saving instruction…' : selectedInstruction() ? 'Confirm & Update Instruction' : 'Confirm & Save Instruction' }}
+                      </button>
+                    </div>
+                  </div>
                 }
 
                 @if (instructionAssistantTurns().length) {
@@ -162,40 +225,7 @@
                 }
 
                 @if (instructionAssistantBusy()) {
-                  <p class="chat-message assistant typing-indicator">Thinking…</p>
-                }
-
-                @if ((instructionDescription || selectedInstruction()) && (!selectedInstruction() || selectedInstruction()?.state === 'DRAFT')) {
-                  <section class="chat-draft-actions" aria-label="Draft instruction actions">
-                    <div class="chat-draft-summary">
-                      <div class="chat-draft-meta-row">
-                        <span class="chat-meta-item">Area: <strong>{{ memberCategoryLabel(instructionMemberCategory) }}</strong></span>
-                        @if (budgets().length > 0) {
-                          <label class="chat-budget-select-label">
-                            <span>Budget:</span>
-                            <select [ngModel]="instructionBudgetId" (ngModelChange)="chooseInstructionBudget($event)">
-                              <option value="">No budget attached</option>
-                              @for (budget of budgets(); track budget.id) {
-                                @if (budget.active) {
-                                  <option [value]="budget.id">{{ budget.name }} (max {{ formatAllocationAmount(budget) }})</option>
-                                }
-                              }
-                            </select>
-                          </label>
-                        } @else {
-                          <small class="chat-budget-note">No active budgets. You can attach one later before activation.</small>
-                        }
-                      </div>
-                      @if (selectedInstructionBudget(); as selectedBudget) {
-                        <small class="chat-budget-detail">Maximum {{ formatAllocationAmount(selectedBudget) }} · {{ budgetDatesLabel(selectedBudget) || 'No date limits' }}</small>
-                      }
-                    </div>
-                    <div class="instruction-form-actions">
-                      <button class="dash-primary" type="button" (click)="saveInstructionDraft()" [disabled]="instructionSaving() || instructionDescription.trim().length < 3">
-                        {{ instructionSaving() ? 'Saving…' : selectedInstruction() ? 'Save changes' : 'Save draft instruction' }}
-                      </button>
-                    </div>
-                  </section>
+                  <p class="chat-message assistant typing-indicator">Scouting options & structuring request…</p>
                 }
               </div>
 
