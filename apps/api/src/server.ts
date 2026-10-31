@@ -1706,13 +1706,24 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       fixtureOrders.set(orderId, completed);
       return json(response, 200, { environment: 'FIXTURE', ...completed });
     }
-    if (request.method === 'POST' && url.pathname === '/api/demo/paypal/webhooks') {
-      const event = await body(request);
-      if (mode === 'sandbox') {
-        const verified = await client().verifyWebhook({ transmissionId: request.headers['paypal-transmission-id'] as string, transmissionTime: request.headers['paypal-transmission-time'] as string, certUrl: request.headers['paypal-cert-url'] as string, authAlgo: request.headers['paypal-auth-algo'] as string, transmissionSig: request.headers['paypal-transmission-sig'] as string }, event);
-        if (!verified) return json(response, 400, { code: 'WEBHOOK_SIGNATURE_INVALID' });
-      } else if (request.headers['x-demo-signature'] !== 'fixture') return json(response, 400, { code: 'FIXTURE_SIGNATURE_REQUIRED' });
-      return json(response, 202, { accepted: true, eventType: event['event_type'] ?? 'UNKNOWN', verified: true });
+    if (url.pathname === '/api/demo/paypal/webhooks') {
+      if (request.method === 'GET' || request.method === 'HEAD') {
+        return json(response, 200, {
+          status: 'ready',
+          service: 'paypal-webhook-receiver',
+          mode,
+          webhookConfigured: Boolean(process.env['PAYPAL_WEBHOOK_ID'] && process.env['PAYPAL_WEBHOOK_ID'] !== 'your-webhook-id')
+        });
+      }
+      if (request.method === 'POST') {
+        const event = await body(request);
+        if (mode === 'sandbox') {
+          const verified = await client().verifyWebhook({ transmissionId: request.headers['paypal-transmission-id'] as string, transmissionTime: request.headers['paypal-transmission-time'] as string, certUrl: request.headers['paypal-cert-url'] as string, authAlgo: request.headers['paypal-auth-algo'] as string, transmissionSig: request.headers['paypal-transmission-sig'] as string }, event);
+          if (!verified) return json(response, 400, { code: 'WEBHOOK_SIGNATURE_INVALID' });
+        } else if (request.headers['x-demo-signature'] !== 'fixture') return json(response, 400, { code: 'FIXTURE_SIGNATURE_REQUIRED' });
+        return json(response, 202, { accepted: true, eventType: event['event_type'] ?? 'UNKNOWN', verified: true });
+      }
+      return json(response, 405, { code: 'METHOD_NOT_ALLOWED' });
     }
     return json(response, 404, { code: 'NOT_FOUND' });
   } catch (error) {

@@ -26,7 +26,7 @@ These are product decisions, not capability evidence. PayPal consent, supported 
 | Execution switch | `EXECUTION_ENABLED=false` by default | Required invariant; no external execution path exists |
 | Local fixture | Accommodation watch, Arusha example, TZS, `REVIEW_REQUIRED` and `PRE_APPROVED` cases | Deterministic fixture only; not a real booking or vendor |
 | Notification | Durable inbox first; real push transport remains open | No phone delivery is claimed |
-| PayPal demo | Orders v2 create, capture, status and webhook verification | Fixture mode works locally; sandbox adapter and local contract tests are present. `npm run test:paypal:sandbox` is the next redacted Developer Dashboard smoke gate and requires sandbox credentials; it creates/status-checks a synthetic order without capture. |
+| PayPal demo | Orders v2 create, capture, status and webhook verification | Sandbox verified: `npm run test:paypal:sandbox` passed against PayPal Sandbox (`45Y59709AF822120F`); webhook registered at `https://appai.themeshak.com/api/demo/paypal/webhooks` (`3FF5509794937781L`) and live simulated event verified with HTTP 202 over Cloudflare Tunnel |
 | Read-only web search | Serper selected for explicit member searches | After the local key was corrected, `npm run test:search:live` passed through the authenticated API and returned three source links for a synthetic query. Market coverage, rendered acceptance and supplier verification remain open. Search snippets are not supplier/payment evidence. |
 
 ## External decisions still required
