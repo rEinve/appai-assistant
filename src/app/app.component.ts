@@ -401,22 +401,13 @@ export class AppComponent implements OnInit {
 
     this.instructionComposerInput = '';
 
-    // If answering clarification questions:
-    if (this.instructionProposal()?.questions && this.instructionProposal()!.questions.length > 0) {
-      this.instructionAssistantReply = text;
-      void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
-      return;
-    }
-
     // Initial instruction prompt:
     if (!this.instructionDescription) {
       this.instructionDescription = text;
-      void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
-      return;
+    } else {
+      // Subsequent instructions or refinements:
+      this.instructionAssistantReply = text;
     }
-
-    // Subsequent instructions or refinements:
-    this.instructionAssistantReply = text;
     void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
   }
 
@@ -493,7 +484,7 @@ export class AppComponent implements OnInit {
       ).pipe(timeout(25_000)));
       if (this.instructionDescription !== requestedDescription || (this.selectedInstruction()?.id ?? null) !== requestedInstructionId) return;
       const proposal = result.proposal;
-      if (reply) this.instructionAssistantTurns.update((turns) => [...turns, { questions: previousProposal?.questions ?? [], reply }].slice(-6));
+      if (reply) this.instructionAssistantTurns.update((turns) => [...turns, { questions: previousProposal?.questions ?? [], reply }]);
       this.instructionAssistantReply = '';
       this.instructionProposal.set(proposal);
       if (proposal.category && this.memberCategories.some((c) => c.id === proposal.category)) {

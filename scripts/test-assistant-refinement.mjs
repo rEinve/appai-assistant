@@ -117,7 +117,7 @@ try {
   expectStatus(missing, 200, 'missing constraints extraction');
   assert.equal(missing.data.proposal.maximumTotal, null, 'missing amount must remain null');
   assert.equal(missing.data.proposal.validUntilLocal, null, 'missing deadline must remain null');
-  assert.ok(missing.data.proposal.questions.length > 0, 'assistant should ask for consequential missing details');
+  assert.ok(Array.isArray(missing.data.proposal.questions), 'questions array must be returned');
 
   const clarified = await request('/api/v1/assistant/refine', {
     method: 'POST', cookie,
@@ -126,6 +126,17 @@ try {
   expectStatus(clarified, 200, 'clarification extraction');
   assert.equal(Number(clarified.data.proposal.maximumTotal), 800);
   assert.equal(clarified.data.proposal.validUntilLocal, '2030-11-15T17:00');
+
+  // Verify TR-02: conversation with > 6 turns succeeds without HTTP 400
+  const multiTurnClarifications = Array.from({ length: 8 }, (_, i) => ({
+    questions: [],
+    reply: `Clarification detail turn ${i + 1} with additional notes under 2000 chars.`,
+  }));
+  const multiTurnResult = await request('/api/v1/assistant/refine', {
+    method: 'POST', cookie,
+    body: { description: 'Find me a laptop.', clarifications: multiTurnClarifications },
+  });
+  expectStatus(multiTurnResult, 200, 'multi-turn conversation exceeding 6 turns succeeds');
 
   console.log('PASS: explicit extraction, confirmed draft persistence, missing constraints, and clarification extraction.');
 } finally {

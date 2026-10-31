@@ -245,20 +245,7 @@
                     </div>
                   }
 
-                  <!-- 4. Follow-up Questions -->
-                  @if (proposal.questions && proposal.questions.length > 0) {
-                    <div class="assistant-questions-bubble">
-                      <strong>Follow-up questions:</strong>
-                      <ul>
-                        @for (q of proposal.questions; track $index) {
-                          <li>{{ q }}</li>
-                        }
-                      </ul>
-                      <small>Reply directly in the chat below to answer or refine.</small>
-                    </div>
-                  }
-
-                  <!-- 5. One-Tap Confirmation / Save Card -->
+                  <!-- 4. One-Tap Confirmation / Save Card -->
                   <div class="instruction-confirm-card">
                     <div class="confirm-info">
                       <strong>Ready to save this instruction?</strong>
@@ -312,20 +299,13 @@
                       (keydown)="onComposerKeydown($event)"
                       [placeholder]="composerPlaceholder"
                       rows="2"
-                      maxlength="500"></textarea>
+                      maxlength="2000"></textarea>
                     <div class="instruction-composer-footer">
                       <div class="instruction-composer-footer-note">
                         <span class="instruction-composer-plus" aria-hidden="true">+</span>
                         <p class="chat-unavailable-note">Suggestions are reviewed before they become draft details.</p>
                       </div>
                       <div class="instruction-composer-actions">
-                        <button
-                          class="dash-secondary"
-                          type="button"
-                          (click)="askAssistantFromComposer()"
-                          [disabled]="(!instructionComposerInput.trim() && !instructionDescription.trim()) || instructionAssistantBusy()">
-                          {{ instructionAssistantBusy() ? 'Thinking…' : 'Ask assistant' }}
-                        </button>
                         <button
                           class="chat-send-btn"
                           type="submit"
