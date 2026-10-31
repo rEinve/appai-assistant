@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./packages/domain/dist",
+    "rootDir": "./packages/domain/src",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "declaration": true,
+    "sourceMap": true
+  },
+  "include": ["packages/domain/src/**/*.ts"]
+}

@@ -1,0 +1,338 @@
+@if (dashboardOpen()) {
+  @if (memberAuthState() === 'authenticated' && memberProfile(); as profile) {
+  <div class="dashboard" [class.navigation-collapsed]="navigationCollapsed()" [class.instructions-view]="dashboardView() === 'Instructions'">
+    <aside class="dash-sidebar"><div class="dash-sidebar-heading"><a class="dash-brand" href="#top" aria-label="Appai home" (click)="closeWorkspace()"><span class="dash-brand-icon">◉</span><span class="dash-brand-name">appai</span></a><button class="dash-navigation-toggle" type="button" (click)="toggleNavigation()" [attr.aria-expanded]="!navigationCollapsed()" aria-label="Toggle main navigation">{{ navigationCollapsed() ? '›' : '‹' }}</button></div><nav aria-label="Member navigation"><button type="button" aria-label="Overview" [class.selected]="dashboardView() === 'Overview'" (click)="dashboardView.set('Overview')">⌂ <span>Overview</span></button><button type="button" aria-label="Instructions" [class.selected]="dashboardView() === 'Instructions'" (click)="openInstructions()">☷ <span>Instructions</span></button><button type="button" aria-label="Planner" [class.selected]="dashboardView() === 'Planner'" (click)="openPlanner()">▦ <span>Planner</span></button><button type="button" aria-label="History" [class.selected]="dashboardView() === 'Activity'" (click)="openActivity()">◷ <span>History</span></button><button type="button" aria-label="Account" [class.selected]="dashboardView() === 'Account'" (click)="openAccount()">◉ <span>Account</span></button></nav><div class="dash-sidebar-bottom"><div class="dash-profile"><span>{{ profile.member.name.slice(0, 1).toUpperCase() }}</span><div><strong>{{ profile.member.name }}</strong><small>Member account</small></div></div><button type="button" (click)="signOut()" [disabled]="authBusy()">↪ <span>Sign out</span></button></div></aside>
+    <main class="dash-main">
+      @if (authError()) {<p class="auth-error" role="alert">{{ authError() }}</p>}
+      @if (dashboardView() === 'Overview') {
+        <div class="dash-title overview-heading"><div><p>YOUR PRIVATE WORKSPACE</p><h1>Good {{ greetingPeriod() }}, {{ profile.member.name.split(' ')[0] }}</h1><span>Here’s what’s happening with your plans and budgets.</span></div></div>
+        <section class="overview-finances" aria-labelledby="overview-finances-title">
+          <div class="overview-section-heading"><div><p class="eyebrow">MONEY AT A GLANCE</p><h2 id="overview-finances-title">Budgets and account</h2></div><button class="dash-text-button" type="button" (click)="openAccount()">Manage account</button></div>
+          <div class="overview-metrics">
+            <article class="overview-metric overview-metric-budget"><span>Budget limits</span><strong>{{ overviewBudgetLimit() }}</strong><small>{{ activeBudgetCount() }} active budget{{ activeBudgetCount() === 1 ? '' : 's' }} · spending limits only</small></article>
+            <article class="overview-metric"><span>Confirmed spending</span><strong>Not tracked</strong><small>Payment history isn’t connected yet.</small></article>
+            <article class="overview-metric"><span>Assistant savings</span><strong>Not measured</strong><small>Needs confirmed purchases and comparable prices.</small></article>
+            <article class="overview-metric"><span>Available account funds</span><strong>Not connected</strong><small>No funding account balance is available.</small></article>
+            <article class="overview-metric"><span>Remaining to spend</span><strong>Not available</strong><small>Remaining funds need a connected spending ledger.</small></article>
+          </div>
+          <p class="overview-finance-note">Budgets set limits for instructions; they are not cash held in Appai or a live account balance. Savings will only be reported against verified comparable prices and confirmed purchases.</p>
+        </section>
+        <section class="overview-panel overview-instructions" aria-labelledby="overview-instructions-title">
+          <div class="overview-section-heading"><div><p class="eyebrow">YOUR REQUESTS</p><h2 id="overview-instructions-title">Instructions</h2></div><button class="dash-primary overview-new-instruction" type="button" (click)="startNewInstruction()"><span aria-hidden="true">＋</span> New instruction</button></div>
+          <div class="overview-instruction-stats"><article><strong>{{ overviewActiveCount() }}</strong><span>Active</span></article><article><strong>{{ overviewDraftCount() }}</strong><span>Drafts to review</span></article><article><strong>{{ overviewUpcomingInstructions().length }}</strong><span>Upcoming checks</span></article></div>
+          @if (overviewInstructionItems().length === 0) {<p class="overview-muted">Your instructions will appear here. Start one when you’re ready.</p>}
+          @else {<div class="overview-instruction-list">@for (instruction of overviewInstructionItems(); track instruction.id) {<article><span class="overview-feed-dot"></span><div><strong>{{ instruction.promptText || instruction.structuredConstraints.description }}</strong><small>{{ memberCategoryLabel(instruction.memberCategory) }} · {{ instruction.state.toLowerCase() }}{{ instruction.executionEnvironment === 'FIXTURE' ? ' · Local fixture' : '' }}</small></div></article>}</div>}
+          <button type="button" class="dash-text-button overview-view-instructions" (click)="openInstructions()">View all instructions</button>
+        </section>
+        <div class="overview-columns">
+          <section class="overview-panel overview-attention" aria-labelledby="overview-attention-title">
+            <div class="overview-section-heading"><div><p class="eyebrow">YOUR NEXT STEPS</p><h2 id="overview-attention-title">Needs attention</h2></div><span class="overview-count">{{ overviewAttentionCount() }}</span></div>
+            @if (!accountSettings()) {<article class="overview-action"><span class="overview-action-mark">1</span><div><strong>Set up your account preferences</strong><p>Choose your currency and timezone before creating budgets.</p></div><button type="button" class="dash-text-button" (click)="openAccount()">Set up</button></article>}
+            @if (!hasActiveBudgets()) {<article class="overview-action"><span class="overview-action-mark">→</span><div><strong>Create a budget</strong><p>Set a spending limit that instructions can use.</p></div><button type="button" class="dash-text-button" (click)="openAccount()">Add budget</button></article>}
+            @if (overviewDraftCount() > 0) {<article class="overview-action"><span class="overview-action-mark">→</span><div><strong>{{ overviewDraftCount() }} instruction draft{{ overviewDraftCount() === 1 ? '' : 's' }} to review</strong><p>Check each request and its budget before activation.</p></div><button type="button" class="dash-text-button" (click)="openInstructions()">Review</button></article>}
+            @if (overviewPendingReviewCount() > 0) {<article class="overview-action"><span class="overview-action-mark">!</span><div><strong>{{ overviewPendingReviewCount() }} review{{ overviewPendingReviewCount() === 1 ? '' : 's' }} waiting</strong><p>Open the request history to see the current review state.</p></div><button type="button" class="dash-text-button" (click)="openActivity()">View</button></article>}
+            @if (accountSettings() && hasActiveBudgets() && overviewDraftCount() === 0 && overviewPendingReviewCount() === 0) {<p class="overview-all-clear">You’re all caught up. We’ll show new tasks here.</p>}
+          </section>
+          <section class="overview-panel overview-activity" aria-labelledby="overview-activity-title">
+            <div class="overview-section-heading"><div><p class="eyebrow">LATEST UPDATES</p><h2 id="overview-activity-title">Recent activity</h2></div><button class="dash-text-button" type="button" (click)="openActivity()">View history</button></div>
+            @if (activityLoading()) {<p class="dash-loading">Loading recent activity…</p>}
+            @else if (overviewRecentActivity().length === 0) {<p class="overview-muted">Your completed requests and updates will appear here.</p>}
+            @else {<div class="overview-feed">@for (item of overviewRecentActivity(); track item.id) {<article><span class="overview-feed-dot"></span><div><strong>{{ item.label }}</strong><p>{{ item.source }} · {{ historyDate(item.createdAt) }}</p><small>{{ item.detail }}@if (item.fixture) { · Local fixture only}</small></div></article>}</div>}
+          </section>
+        </div>
+        @if (overviewUpcomingInstructions().length > 0) {<section class="overview-panel overview-upcoming" aria-labelledby="overview-upcoming-title"><div class="overview-section-heading"><div><p class="eyebrow">ON THE CALENDAR</p><h2 id="overview-upcoming-title">Coming up</h2></div><button class="dash-text-button" type="button" (click)="openPlanner()">Open planner</button></div><div class="overview-upcoming-list">@for (instruction of overviewUpcomingInstructions(); track instruction.id) {<article><div><strong>{{ instruction.promptText || instruction.structuredConstraints.description }}</strong><small>{{ memberCategoryLabel(instruction.memberCategory) }} · {{ instruction.executionEnvironment === 'FIXTURE' ? 'Local fixture check' : 'Scheduled check' }}</small></div><time [attr.datetime]="instruction.nextRunAt">{{ historyDate(instruction.nextRunAt!) }}</time></article>}</div></section>}
+      } @else if (dashboardView() === 'Instructions') {
+        @if (instructionError()) {<p class="instruction-error" role="alert">{{ instructionError() }}</p>}
+        @if (instructionSetupError()) {<p class="instruction-error" role="alert">{{ instructionSetupError() }}</p>}
+        @if (instructionNotice()) {<p class="planner-save-notice" role="status">{{ instructionNotice() }}</p>}
+        <section class="instruction-workspace" aria-label="Instructions and conversation">
+          <aside class="instruction-history" aria-label="Instruction categories">
+            @if (instructionLoading()) {<p class="dash-loading">Loading instructions…</p>}
+            <nav class="instruction-history-groups" aria-label="Saved instructions">
+              <div class="instruction-history-group"><p class="instruction-history-label">Recent</p>
+                @if (recentInstructions().length) {@for (instruction of recentInstructions(); track instruction.id) {<button type="button" class="instruction-history-item" [class.selected]="selectedInstruction()?.id === instruction.id" (click)="selectInstruction(instruction)"><strong>{{ instruction.promptText || instruction.structuredConstraints.description }}</strong><small>{{ memberCategoryLabel(instruction.memberCategory) }} · {{ instruction.state.toLowerCase() }}</small></button>}}
+                @else {<p class="instruction-history-empty">Your saved instructions will appear here.</p>}
+              </div>
+              @for (category of memberCategories; track category.id) {
+                <div class="instruction-history-group">
+                  <div class="instruction-category-row"><button type="button" class="instruction-category-toggle" [attr.aria-expanded]="expandedInstructionCategories()[category.id]" (click)="toggleInstructionCategory(category.id)"><span>{{ category.label }}</span><small>{{ instructionsForCategory(category.id).length }}</small><span class="instruction-category-chevron" aria-hidden="true">{{ expandedInstructionCategories()[category.id] ? '⌄' : '›' }}</span></button><button type="button" class="instruction-category-add" [attr.aria-label]="'New ' + category.label.toLowerCase() + ' instruction'" [title]="'New ' + category.label.toLowerCase() + ' instruction'" (click)="startNewInstruction(category.id)">+</button></div>
+                  @if (expandedInstructionCategories()[category.id]) {
+                    @if (instructionsForCategory(category.id).length) {@for (instruction of instructionsForCategory(category.id); track instruction.id) {<button type="button" class="instruction-history-item instruction-category-item" [class.selected]="selectedInstruction()?.id === instruction.id" (click)="selectInstruction(instruction)"><strong>{{ instruction.promptText || instruction.structuredConstraints.description }}</strong><small>{{ instruction.state.toLowerCase() }}{{ instruction.budgetId ? ' · ' + budgetLabel(instruction.budgetId) : '' }}</small></button>}}
+                    @else {<p class="instruction-history-empty">No {{ category.label.toLowerCase() }} instructions yet.</p>}
+                  }
+                </div>
+              }
+            </nav>
+          </aside>
+          <section class="instruction-chat" aria-labelledby="instruction-chat-title">
+            <header><div><p class="eyebrow">{{ selectedInstruction() ? 'SAVED INSTRUCTION' : 'YOUR INSTRUCTIONS' }}</p><h2 id="instruction-chat-title">{{ selectedInstruction() ? (selectedInstruction()!.state === 'DRAFT' ? 'Edit instruction' : 'Instruction details') : 'Let’s set it up' }}</h2></div>
+              @if (selectedInstruction(); as selected) {<div class="instruction-chat-header-actions"><span class="instruction-state-pill">{{ selected.state.replace('_', ' ') }}</span>@if (selected.state === 'DRAFT') {<button class="dash-secondary instruction-discard-button" type="button" (click)="requestDiscardInstruction(selected)">Delete draft</button>}</div>}
+            </header>
+            <div class="instruction-chat-body">
+              <div class="instruction-chat-thread" aria-live="polite">
+                @if (selectedInstruction(); as selected) {
+                  <p class="chat-message assistant">You’re looking at this saved instruction. You can continue refining the wording, area, and budget here.</p>
+                  <p class="chat-message member">{{ selected.promptText || selected.structuredConstraints.description }}</p>
+                  @if (selected.state !== 'DRAFT') {<p class="chat-message assistant">This instruction is {{ selected.state.toLowerCase() }} and can’t be edited here. You can review its details below or revoke it to stop future activity.</p>
+                    @if (selected.state === 'ACTIVE' || selected.state === 'PAUSED') {<div class="instruction-form-actions"><button class="dash-secondary" type="button" (click)="changeInstructionLifecycle(selected, selected.state === 'ACTIVE' ? 'pause' : 'resume')" [disabled]="fixtureActivationId()">{{ selected.state === 'ACTIVE' ? 'Pause fixture' : 'Resume fixture' }}</button><button class="dash-secondary" type="button" (click)="requestDiscardInstruction(selected)">Revoke instruction</button></div>}
+                    @if (instructionDeleteConfirmId() === selected.id) {<div class="instruction-delete-confirm" role="group" aria-label="Confirm instruction removal"><p>Revoke this instruction and stop future activity? The audit record will be retained.</p><button class="dash-secondary" type="button" (click)="instructionDeleteConfirmId.set(null)">Keep it</button><button class="dash-primary" type="button" (click)="discardInstruction(selected)" [disabled]="fixtureActivationId()">Revoke instruction</button></div>}
+                  } @else {
+                    @if (instructionDeleteConfirmId() === selected.id) {<div class="instruction-delete-confirm" role="group" aria-label="Confirm draft removal"><p>Remove this draft from your list? Its audit record will be retained.</p><button class="dash-secondary" type="button" (click)="instructionDeleteConfirmId.set(null)">Keep draft</button><button class="dash-primary" type="button" (click)="discardInstruction(selected)" [disabled]="fixtureActivationId()">Delete draft</button></div>}
+                    @if (selected.executionEnvironment === 'FIXTURE') {@if (readinessReports()[selected.id]; as report) {<section class="readiness-report" aria-live="polite"><strong>{{ report.canActivateFixture ? 'Ready for a local fixture run' : 'Fixture run is blocked' }}</strong><p class="fixture-label">{{ report.fixtureLabel }}</p>@if (report.fixtureBlockers.length > 0) {<ul>@for (blocker of report.fixtureBlockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul>} @else {<button class="dash-secondary readiness-button" type="button" (click)="activateFixture(selected)" [disabled]="fixtureActivationId() === selected.id">{{ fixtureActivationId() === selected.id ? 'Starting fixture…' : 'Start fixture-only run' }}</button>}<details><summary>Why real purchasing is unavailable</summary><ul>@for (blocker of report.blockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul></details></section>} @else {<button class="dash-secondary" type="button" (click)="checkActivationReadiness(selected.id)" [disabled]="readinessLoadingId() === selected.id">{{ readinessLoadingId() === selected.id ? 'Checking fixture readiness…' : 'Check fixture readiness' }}</button>}}
+                    @if (instructionChatStep() !== 'prompt') {<p class="chat-message member">{{ instructionDescription }}</p>@if (!instructionAreaPreselected()) {<p class="chat-message assistant">Which area should this belong to?</p>}}
+                    @if (!instructionAreaPreselected() && (instructionChatStep() === 'category' || instructionChatStep() === 'budget' || instructionChatStep() === 'review')) {<div class="chat-choice-grid">@for (category of memberCategories; track category.id) {<button type="button" class="chat-choice" [class.chosen]="instructionMemberCategory === category.id" (click)="instructionMemberCategory = category.id; advanceInstructionChat('budget')">{{ category.label }}</button>}</div>}
+                    @if (instructionChatStep() === 'budget' || instructionChatStep() === 'review') {
+                      <p class="chat-message member">{{ memberCategoryLabel(instructionMemberCategory) }}</p><p class="chat-message assistant">Which budget should cover this? I’ll carry its maximum and date limits into the instruction.</p>
+                      <div class="chat-budget-choices">@for (budget of budgets(); track budget.id) {@if (budget.active) {<button type="button" class="chat-budget-choice" [class.chosen]="instructionBudgetId === budget.id" (click)="chooseInstructionBudget(budget.id)"><strong>{{ budget.name }}</strong><span>Maximum {{ formatAllocationAmount(budget) }}</span>@if (budgetDatesLabel(budget)) {<small>{{ budgetDatesLabel(budget) }}</small>}</button>}}</div>
+                      <button type="button" class="dash-text-button" (click)="chooseInstructionBudget('')">Continue without a budget</button>
+                    }
+                    @if (instructionChatStep() === 'review') {
+                      <p class="chat-message member">{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'I’ll choose a budget later' }}</p><p class="chat-message assistant">{{ selectedInstruction() ? 'Review your changes before saving. This updates the draft only; it does not schedule or make a purchase.' : 'I have enough to save this draft. You can review it before activation. It won’t schedule or make a purchase.' }}</p>
+                      <div class="chat-review-summary"><span>{{ memberCategoryLabel(instructionMemberCategory) }}</span><strong>{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'No budget selected' }}</strong>@if (selectedInstructionBudget(); as selectedBudget) {<small>Maximum {{ formatAllocationAmount(selectedBudget) }} · {{ budgetDatesLabel(selectedBudget) || 'No date limits' }}</small>} @else {<small>A budget is required before activation.</small>}</div>
+                      <div class="instruction-form-actions"><button class="dash-secondary" type="button" (click)="advanceInstructionChat('budget')">Back</button><button class="dash-primary" type="button" (click)="saveInstructionDraft()" [disabled]="instructionSaving()">{{ instructionSaving() ? 'Saving…' : selectedInstruction() ? 'Save changes' : 'Save instruction' }}</button></div>
+                    }
+                    @if (instructionChatStep() !== 'prompt' && instructionProposal(); as proposal) {<section class="assistant-proposal compact"><strong>Assistant draft details</strong><span>{{ proposal.summary }}</span><span>Maximum: {{ instructionMaximumTotal || 'Not specified' }} · Start: {{ instructionValidFromLocal || 'Not specified' }} · Deadline: {{ instructionValidUntilLocal || 'Not specified' }}</span><button class="dash-text-button" type="button" (click)="advanceInstructionChat('prompt')">Review suggestions</button></section>}
+                  }
+                } @else {
+                  <p class="chat-message assistant">Hi {{ profile.member.name.split(' ')[0] }}, what would you like handled? Write it naturally. I’ll keep your wording as the instruction.</p>
+                  @if (instructionChatStep() !== 'prompt') {<p class="chat-message member">{{ instructionDescription }}</p>@if (!instructionAreaPreselected()) {<p class="chat-message assistant">Which area should this belong to?</p>}}
+                  @if (!instructionAreaPreselected() && (instructionChatStep() === 'category' || instructionChatStep() === 'budget' || instructionChatStep() === 'review')) {<div class="chat-choice-grid">@for (category of memberCategories; track category.id) {<button type="button" class="chat-choice" [class.chosen]="instructionMemberCategory === category.id" (click)="instructionMemberCategory = category.id; advanceInstructionChat('budget')">{{ category.label }}</button>}</div>}
+                  @if (instructionChatStep() === 'budget' || instructionChatStep() === 'review') {
+                    <p class="chat-message member">{{ memberCategoryLabel(instructionMemberCategory) }}</p><p class="chat-message assistant">Which budget should cover this? I’ll carry its maximum and date limits into the instruction.</p>
+                    <div class="chat-budget-choices">@for (budget of budgets(); track budget.id) {@if (budget.active) {<button type="button" class="chat-budget-choice" [class.chosen]="instructionBudgetId === budget.id" (click)="chooseInstructionBudget(budget.id)"><strong>{{ budget.name }}</strong><span>Maximum {{ formatAllocationAmount(budget) }}</span>@if (budgetDatesLabel(budget)) {<small>{{ budgetDatesLabel(budget) }}</small>}</button>}}</div>
+                    <button type="button" class="dash-text-button" (click)="chooseInstructionBudget('')">Continue without a budget</button>
+                  }
+                  @if (instructionChatStep() === 'review') {<p class="chat-message member">{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'I’ll choose a budget later' }}</p><p class="chat-message assistant">I have enough to save this draft. You can review it before activation. It won’t schedule or make a purchase.</p><div class="chat-review-summary"><span>{{ memberCategoryLabel(instructionMemberCategory) }}</span><strong>{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'No budget selected' }}</strong>@if (selectedInstructionBudget(); as selectedBudget) {<small>Maximum {{ formatAllocationAmount(selectedBudget) }} · {{ budgetDatesLabel(selectedBudget) || 'No date limits' }}</small>} @else {<small>A budget is required before activation.</small>}</div><div class="instruction-form-actions"><button class="dash-secondary" type="button" (click)="advanceInstructionChat('budget')">Back</button><button class="dash-primary" type="button" (click)="saveInstructionDraft()" [disabled]="instructionSaving()">{{ instructionSaving() ? 'Saving…' : 'Save instruction' }}</button></div>}
+                  @if (instructionChatStep() !== 'prompt' && instructionProposal(); as proposal) {<section class="assistant-proposal compact"><strong>Assistant draft details</strong><span>{{ proposal.summary }}</span><span>Maximum: {{ instructionMaximumTotal || 'Not specified' }} · Start: {{ instructionValidFromLocal || 'Not specified' }} · Deadline: {{ instructionValidUntilLocal || 'Not specified' }}</span><button class="dash-text-button" type="button" (click)="advanceInstructionChat('prompt')">Review suggestions</button></section>}
+                }
+                @if (!selectedInstruction() || selectedInstruction()?.state === 'DRAFT') {
+                  <section class="web-search-panel" aria-labelledby="web-search-title">
+                    <div><h3 id="web-search-title">Explore suppliers on the web</h3><p>Search only when you choose to. Your query is sent to the search provider; results are unverified leads.</p></div>
+                    <form class="web-search-form" (ngSubmit)="searchWeb()"><label for="web-search-query">Search terms</label><div><input id="web-search-query" name="webSearchQuery" type="search" [(ngModel)]="webSearchQuery" (ngModelChange)="webSearchResult.set(null); webSearchError.set(null)" minlength="3" maxlength="160" placeholder="For example: laptop shops in Arusha" /><button class="dash-secondary" type="submit" [disabled]="webSearchBusy() || webSearchQuery.trim().length < 3">{{ webSearchBusy() ? 'Searching…' : 'Search web' }}</button></div></form>
+                    @if (webSearchError()) {<p class="instruction-error" role="alert">{{ webSearchError() }}</p>}
+                    @if (webSearchResult(); as search) {<div class="web-search-results" aria-live="polite"><p>Web results checked {{ historyDate(search.fetchedAt) }}. Confirm each supplier, price, and payment method yourself.</p>@if (search.results.length) {<ul>@for (result of search.results; track result.url) {<li><a [href]="result.url" target="_blank" rel="noopener noreferrer">{{ result.title }} ↗</a>@if (result.snippet) {<span>{{ result.snippet }}</span>}</li>}</ul>} @else {<p>No matching web results were returned. Try different search terms.</p>}</div>}
+                  </section>
+                }
+              </div>
+              @if (!selectedInstruction() || selectedInstruction()?.state === 'DRAFT') { @if (instructionChatStep() === 'prompt') {<form class="instruction-chat-composer" (ngSubmit)="submitInstructionPrompt()"><label class="visually-hidden" for="instruction-description">{{ selectedInstruction() ? 'Edit your instruction' : 'Your instruction' }}</label><div class="instruction-composer-card"><textarea id="instruction-description" name="instructionDescription" [(ngModel)]="instructionDescription" (ngModelChange)="draftIdempotencyKey = ''; clearAssistantProposal()" required minlength="3" maxlength="500" rows="2" [placeholder]="selectedInstruction() ? 'Edit this instruction in your own words.' : 'For example: Find me a quiet place to stay in Arusha next month.'"></textarea><div class="instruction-composer-footer"><span class="instruction-composer-plus" aria-hidden="true">+</span><p class="chat-unavailable-note">Suggestions are reviewed before they become draft details.</p><button class="dash-secondary" type="button" (click)="refineInstructionWithAssistant()" [disabled]="instructionDescription.trim().length < 3 || instructionAssistantBusy()">{{ instructionAssistantBusy() ? 'Thinking…' : 'Ask assistant' }}</button><button class="dash-primary" type="submit" [disabled]="instructionDescription.trim().length < 3">{{ selectedInstruction() ? 'Continue editing' : 'Continue manually' }}</button></div></div></form>
+                @if (instructionProposal(); as proposal) {<section class="assistant-proposal" aria-labelledby="assistant-proposal-title"><h3 id="assistant-proposal-title">Assistant suggestions</h3><p>{{ proposal.summary }}</p><div class="assistant-proposal-fields"><label>Maximum ({{ accountSettings()?.currency || 'account currency' }})<input type="text" inputmode="decimal" [ngModel]="instructionMaximumTotal" (ngModelChange)="updateAssistantProposalField('maximumTotal', $event)" name="assistantMaximum" placeholder="No amount found" /></label><label>Starts at ({{ accountSettings()?.timezone || 'account timezone' }})<input type="datetime-local" [ngModel]="instructionValidFromLocal" (ngModelChange)="updateAssistantProposalField('validFromLocal', $event)" name="assistantStart" /></label><label>Deadline ({{ accountSettings()?.timezone || 'account timezone' }})<input type="datetime-local" [ngModel]="instructionValidUntilLocal" (ngModelChange)="updateAssistantProposalField('validUntilLocal', $event)" name="assistantDeadline" /></label></div>@if (proposal.questions.length) {<div><strong>Needs your input</strong><ul>@for (question of proposal.questions; track $index) {<li>{{ question }}</li>}</ul></div>}@if (instructionAssistantTurns().length) {<div class="assistant-chat-history" aria-label="Clarification replies">@for (turn of instructionAssistantTurns(); track $index) {<p><strong>You:</strong> {{ turn.reply }}</p>}</div>}<label class="assistant-reply-label" for="assistant-reply">Add a detail or answer a question<textarea id="assistant-reply" name="assistantReply" [(ngModel)]="instructionAssistantReply" rows="2" maxlength="500" placeholder="For example: I need it before 15 November."></textarea></label><button class="dash-secondary" type="button" (click)="refineInstructionWithAssistant()" [disabled]="instructionAssistantBusy() || instructionAssistantReply.trim().length < 1">{{ instructionAssistantBusy() ? 'Thinking…' : 'Reply and refine' }}</button><p class="assistant-proposal-note">Check each value. Saving creates a draft only; it does not schedule or purchase anything.</p></section>}
+              }}
+              @if (instructionChatStep() === 'budget' && budgets().length === 0) {<p class="instruction-field-help">You can create a budget in Account and attach it later. A budget is required before activation.</p>}
+              @if (instructionChatStep() !== 'prompt') {<p class="chat-unavailable-note">Web search results are leads only. Supplier verification and automated discovery are still being developed.</p>}
+            </div>
+          </section>
+        </section>
+      } @else if (dashboardView() === 'Planner') {
+        <div class="dash-title"><div><p>YOUR PRIVATE WORKSPACE</p><h1>Planner</h1><span>Plan your days and follow your budgets.</span></div></div>
+        <section class="member-calendar planner-surface" aria-label="Planner">
+          <div class="planner-view-switch" role="group" aria-label="Planner view">
+            <button type="button" [class.selected]="plannerMode() === 'day'" [attr.aria-pressed]="plannerMode() === 'day'" (click)="showPlannerDay()">Day</button>
+            <button type="button" [class.selected]="plannerMode() === 'month'" [attr.aria-pressed]="plannerMode() === 'month'" (click)="plannerMode.set('month')">Month</button>
+          </div>
+          <div class="planner-toolbar">
+            <header>
+              <h2>{{ plannerMode() === 'day' ? calendarDateLabel(calendarSelectedDate()) : calendarMonthLabel() }}</h2>
+              @if (plannerMode() === 'day') {<button class="dash-secondary" type="button" [attr.aria-label]="'Add budget for ' + calendarDateLabel(calendarSelectedDate())" (click)="openBudgetDialog(budgetDialog)">+</button>}
+            </header>
+            <nav aria-label="Planner dates">
+              <button class="dash-secondary" type="button" (click)="plannerMode() === 'day' ? shiftPlannerDate(-1) : shiftCalendarMonth(-1)" [attr.aria-label]="plannerMode() === 'day' ? 'Previous day' : 'Previous month'">‹</button>
+              <button type="button" class="dash-text-button" (click)="goToPlannerToday()">Today</button>
+              <button class="dash-secondary" type="button" (click)="plannerMode() === 'day' ? shiftPlannerDate(1) : shiftCalendarMonth(1)" [attr.aria-label]="plannerMode() === 'day' ? 'Next day' : 'Next month'">›</button>
+            </nav>
+          </div>
+          @if (budgetCreatedDate()) {
+            <p class="planner-save-notice" role="status">Budget created on {{ calendarDateLabel(budgetCreatedDate()) }}.@if (calendarSelectedDate() !== budgetCreatedDate() || plannerMode() === 'month') { <button class="dash-text-button" type="button" (click)="showBudgetCreationDay()">View day</button>}</p>
+          }
+          @if (plannerMode() === 'month') {
+            <div class="calendar-grid planner-month-grid" role="group" aria-label="Monthly planner">
+              <div class="calendar-weekday">Sun</div><div class="calendar-weekday">Mon</div><div class="calendar-weekday">Tue</div><div class="calendar-weekday">Wed</div><div class="calendar-weekday">Thu</div><div class="calendar-weekday">Fri</div><div class="calendar-weekday">Sat</div>
+              @for (day of calendarDays(); track day.dateKey) {
+                <button type="button" class="calendar-day" [class.outside-month]="!day.inMonth" [class.selected]="calendarSelectedDate() === day.dateKey" [class.today]="day.isToday" [attr.aria-current]="day.isToday ? 'date' : null" [attr.aria-label]="calendarDateLabel(day.dateKey) + ', ' + day.entries.length + ' planned items, ' + day.budgetCount + ' budgets created'" (click)="showPlannerDay(day.dateKey)">
+                  <span>{{ day.day }}</span>@if (day.entries.length) {<small>{{ day.entries.length }} planned</small>}@if (day.budgetCount) {<small>{{ day.budgetCount }} {{ day.budgetCount === 1 ? 'budget' : 'budgets' }}</small>}
+                </button>
+              }
+            </div>
+          } @else {
+            <div class="planner-day-agenda">
+              @if (calendarSelectedEntries().length) {
+                <ol class="planner-agenda-list">@for (entry of calendarSelectedEntries(); track entry.instructionId + entry.kind) {<li><time>{{ plannerTime(entry.at) }}</time><span class="agenda-marker" aria-hidden="true"></span><div><h3>{{ entry.title }}</h3><p>{{ entry.kind }} · {{ memberCategoryLabel(entry.memberCategory) }}</p></div></li>}</ol>
+              }
+              @if (budgetsForDate(calendarSelectedDate()).length) {
+                <div class="budget-list" aria-label="Budgets created on this day">
+                  @for (budget of budgetsForDate(calendarSelectedDate()); track budget.id) {
+                    <article><div><strong>{{ budget.name }}</strong><small>Created {{ plannerTime(budget.createdAt) }} · {{ budget.active ? 'Active budget' : 'Inactive budget' }}@if (budgetDatesLabel(budget)) { · {{ budgetDatesLabel(budget) }}}</small></div><b>Max {{ formatAllocationAmount(budget) }}</b></article>
+                  }
+                </div>
+              }
+            </div>
+          }
+          <dialog #budgetDialog aria-modal="true" aria-labelledby="planner-budget-title" aria-describedby="planner-budget-help" (cancel)="closeBudgetDialog(budgetDialog, $event)">
+            <header><h2 id="planner-budget-title">Create budget</h2><button class="dash-secondary" type="button" aria-label="Close budget form" (click)="closeBudgetDialog(budgetDialog)" [disabled]="budgetSaving()">×</button></header>
+            <p id="planner-budget-help">Set a spending limit. This budget will be listed on the day it is created.</p>
+            @if (accountSettings(); as settings) {
+              <form #budgetForm="ngForm" class="instruction-form planner-budget-form" (ngSubmit)="budgetForm.valid && createBudgetAllocation(budgetDialog)">
+                <fieldset [disabled]="budgetSaving()">
+                  <div><label for="planner-budget-name">Budget name</label><input id="planner-budget-name" name="budgetName" [(ngModel)]="budgetName" (ngModelChange)="budgetIdempotencyKey = ''" required minlength="2" maxlength="80" placeholder="Monthly household budget" autofocus /></div>
+                  <div><label for="planner-budget-amount">Maximum budget ({{ settings.currency }})</label><input id="planner-budget-amount" name="budgetAmount" type="text" inputmode="decimal" [(ngModel)]="budgetAmount" (ngModelChange)="budgetIdempotencyKey = ''" required maxlength="40" placeholder="For example: 250000" /><small>A spending limit, not money held in Appai.</small></div>
+                  <div class="budget-date-fields">
+                    <div><label for="planner-budget-date">Start date (optional)</label><input id="planner-budget-date" name="budgetStartDate" type="date" [(ngModel)]="budgetStartDate" (ngModelChange)="budgetIdempotencyKey = ''" [required]="!!budgetStartTime" /></div>
+                    <div><label for="planner-budget-time">Start time</label><input id="planner-budget-time" name="budgetStartTime" type="time" [(ngModel)]="budgetStartTime" (ngModelChange)="budgetIdempotencyKey = ''" [required]="!!budgetStartDate" /></div>
+                    <small>Choose a time if you set a start date. All times use {{ settings.timezone }}.</small>
+                  </div>
+                  <div><label for="planner-budget-until">Deadline (optional)</label><input id="planner-budget-until" name="budgetValidUntil" type="datetime-local" [(ngModel)]="budgetValidUntil" (ngModelChange)="budgetIdempotencyKey = ''" /><small>Linked instructions inherit these dates and can narrow the period.</small></div>
+                </fieldset>
+                @if (budgetError()) {<p class="planner-budget-error" role="alert">{{ budgetError() }}</p>}
+                <div class="instruction-form-actions"><button class="dash-secondary" type="button" (click)="closeBudgetDialog(budgetDialog)" [disabled]="budgetSaving()">Cancel</button><button class="dash-primary" type="submit" [disabled]="budgetSaving() || budgetForm.invalid || !budgetName.trim() || !budgetAmount.trim()">{{ budgetSaving() ? 'Creating…' : 'Create budget' }}</button></div>
+              </form>
+            } @else {
+              <p class="account-prerequisite">Set account currency and timezone before creating a budget.</p>
+              <button class="dash-secondary" type="button" (click)="closeBudgetDialog(budgetDialog); openAccount()">Open account settings</button>
+            }
+          </dialog>
+        </section>
+      } @else if (dashboardView() === 'Account') {
+        <div class="dash-title"><div><p>YOUR PRIVATE WORKSPACE</p><h1>Account</h1><span>Your profile is loaded from your authenticated account.</span></div></div>
+        @if (accountError()) {<div class="instruction-error" role="alert">{{ accountError() }} @if (settingsConflict()) {<button class="dash-secondary readiness-button" type="button" (click)="openAccount()" [disabled]="accountLoading()">{{ accountLoading() ? 'Reloading…' : 'Reload saved settings' }}</button>}</div>}
+        @if (accountLoading()) {<p class="dash-loading">Loading account setup…</p>}
+        @else {
+          <div class="account-panels">
+          <section class="member-account"><div><small>NAME</small><strong>{{ profile.member.name }}</strong></div><div><small>EMAIL</small><strong>{{ profile.member.email }}</strong></div><div><small>SAVED INSTRUCTIONS</small><strong>{{ profile.workspace.instructionCount }}</strong></div></section>
+          <section class="member-account account-setup-card"><div><p class="eyebrow">ACCOUNT SETUP</p><h2>Currency and timezone</h2><p>Choose how amounts and dates are interpreted in your workspace.</p></div>
+            <form class="instruction-form account-settings-form" (ngSubmit)="saveAccountSettings()">
+              <div><label for="account-timezone">Timezone</label><select id="account-timezone" name="settingsTimezone" [(ngModel)]="settingsTimezone" (ngModelChange)="settingsIdempotencyKey = ''" required><option value="" disabled>Choose a timezone</option>@for (group of timezoneGroups; track group.region) {<optgroup [label]="group.region">@for (timezone of group.zones; track timezone) {<option [value]="timezone">{{ timezoneLabel(timezone) }}</option>}</optgroup>}</select><small>Choose the timezone for dates and schedules.</small></div>
+              <div class="account-currency-fields"><div><label for="account-currency">Currency</label><select id="account-currency" name="settingsCurrency" [(ngModel)]="settingsCurrency" (ngModelChange)="onSettingsCurrencyChange($event)" required><option value="" disabled>Choose a currency</option>@for (currency of currencyChoices; track currency.code) {<option [value]="currency.code">{{ currency.name }} ({{ currency.code }})</option>}</select></div><div><label for="currency-scale">Minor-unit scale</label><select id="currency-scale" name="settingsCurrencyScale" [(ngModel)]="settingsCurrencyScale" (ngModelChange)="settingsIdempotencyKey = ''" required><option value="" disabled>Choose a currency first</option>@for (scale of currencyScales; track scale) {<option [value]="scale">{{ scale }} decimal {{ scale === 1 ? 'place' : 'places' }}</option>}</select></div></div>
+              @if (budgets().length > 0) {<p class="instruction-safety-note">Currency and scale are locked after allocations exist. Timezone can still be updated.</p>}
+              <button class="dash-primary" type="submit" [disabled]="settingsSaving()">{{ settingsSaving() ? 'Saving…' : accountSettings() ? 'Save account settings' : 'Save account setup' }}</button>
+            </form>
+          </section>
+          <section class="member-account account-setup-card"><div><p class="eyebrow">YOUR PRIVATE LIST</p><h2>Suppliers you know</h2><p>Only your account can see these suppliers. Add providers you have used or trust; this list helps prioritize discovery when it becomes available.</p></div>
+            <form class="instruction-form account-settings-form" (ngSubmit)="addPrivateSupplier()">
+              <div><label for="private-supplier-name">Supplier name</label><input id="private-supplier-name" name="privateSupplierName" [(ngModel)]="privateSupplierName" (ngModelChange)="supplierIdempotencyKey = ''" required minlength="2" maxlength="160" placeholder="Name you recognize" /></div>
+              <fieldset class="supplier-category-picker"><legend>What do they provide?</legend><label><input type="checkbox" [checked]="privateSupplierCategories.includes('PRODUCT')" (change)="togglePrivateSupplierCategory('PRODUCT', $any($event.target).checked)" /> Products</label><label><input type="checkbox" [checked]="privateSupplierCategories.includes('BILL')" (change)="togglePrivateSupplierCategory('BILL', $any($event.target).checked)" /> Bills and services</label><label><input type="checkbox" [checked]="privateSupplierCategories.includes('ACCOMMODATION')" (change)="togglePrivateSupplierCategory('ACCOMMODATION', $any($event.target).checked)" /> Accommodation</label></fieldset>
+              <div><label for="private-supplier-areas">Service areas</label><input id="private-supplier-areas" name="privateSupplierAreas" [(ngModel)]="privateSupplierAreas" (ngModelChange)="supplierIdempotencyKey = ''" maxlength="600" placeholder="For example: Arusha, Dar es Salaam" /><small>Separate places with commas.</small></div>
+              <div><label for="private-supplier-notes">Private note (optional)</label><textarea id="private-supplier-notes" name="privateSupplierNotes" [(ngModel)]="privateSupplierNotes" (ngModelChange)="supplierIdempotencyKey = ''" maxlength="1000" rows="2" placeholder="Your own reminder; never shared with other members"></textarea></div>
+              <button class="dash-primary" type="submit" [disabled]="supplierSaving() || !privateSupplierName.trim() || !privateSupplierCategories.length">{{ supplierSaving() ? 'Saving…' : 'Add to my private list' }}</button>
+            </form>
+            @if (memberSuppliers().length === 0) {<div class="account-empty"><strong>Your private list is empty</strong><p>Suppliers you add here are visible only to you.</p></div>}
+            @else {<div class="budget-list supplier-list">@for (supplier of memberSuppliers(); track supplier.id) {
+              <article class="supplier-list-item"><div class="supplier-list-details"><strong>{{ supplier.name }}</strong><small>{{ supplierCategorySummary(supplier.categories) }}@if (supplier.serviceAreas.length) { · {{ supplier.serviceAreas.join(', ') }}}</small>@if (supplier.privateNotes) {<small>{{ supplier.privateNotes }}</small>}</div><div class="supplier-list-actions"><span>Private to you</span><button class="dash-secondary" type="button" (click)="editPrivateSupplier(supplier)" [disabled]="supplierEditSaving() || supplierDeleteBusy()">Edit</button><button class="dash-secondary supplier-remove-button" type="button" (click)="requestDeletePrivateSupplier(supplier)" [disabled]="supplierEditSaving() || supplierDeleteBusy()">Remove</button></div></article>
+              @if (supplierEditId() === supplier.id) {<form class="instruction-form account-settings-form supplier-edit-form" (ngSubmit)="savePrivateSupplierEdit(supplier)">
+                <div><label [for]="'edit-supplier-name-' + supplier.id">Supplier name</label><input [id]="'edit-supplier-name-' + supplier.id" [name]="'editSupplierName-' + supplier.id" [(ngModel)]="supplierEditName" required minlength="2" maxlength="160" /></div>
+                <fieldset class="supplier-category-picker"><legend>Services they provide</legend><label><input type="checkbox" [checked]="supplierEditCategories.includes('PRODUCT')" (change)="togglePrivateSupplierEditCategory('PRODUCT', $any($event.target).checked)" /> Products</label><label><input type="checkbox" [checked]="supplierEditCategories.includes('BILL')" (change)="togglePrivateSupplierEditCategory('BILL', $any($event.target).checked)" /> Bills and services</label><label><input type="checkbox" [checked]="supplierEditCategories.includes('ACCOMMODATION')" (change)="togglePrivateSupplierEditCategory('ACCOMMODATION', $any($event.target).checked)" /> Accommodation</label></fieldset>
+                <div><label [for]="'edit-supplier-areas-' + supplier.id">Service areas</label><input [id]="'edit-supplier-areas-' + supplier.id" [name]="'editSupplierAreas-' + supplier.id" [(ngModel)]="supplierEditAreas" maxlength="600" placeholder="For example: Arusha, Dar es Salaam" /><small>Separate places with commas.</small></div>
+                <div><label [for]="'edit-supplier-notes-' + supplier.id">Private note (optional)</label><textarea [id]="'edit-supplier-notes-' + supplier.id" [name]="'editSupplierNotes-' + supplier.id" [(ngModel)]="supplierEditNotes" maxlength="1000" rows="2" placeholder="Your own reminder; never shared with other members"></textarea></div>
+                @if (supplierEditError()) {<p class="instruction-error" role="alert">{{ supplierEditError() }}</p>}
+                <div class="instruction-form-actions"><button class="dash-secondary" type="button" (click)="cancelPrivateSupplierEdit()" [disabled]="supplierEditSaving()">Cancel</button><button class="dash-primary" type="submit" [disabled]="supplierEditSaving() || !supplierEditName.trim() || !supplierEditCategories.length">{{ supplierEditSaving() ? 'Saving…' : 'Save supplier' }}</button></div>
+              </form>}
+              @if (supplierDeleteConfirmId() === supplier.id) {<div class="supplier-delete-confirm" role="group" [attr.aria-label]="'Remove ' + supplier.name">
+                <p>Remove <strong>{{ supplier.name }}</strong> from your private supplier list? This also clears its saved budget ranking.</p><button class="dash-secondary" type="button" (click)="supplierDeleteConfirmId.set(null)" [disabled]="supplierDeleteBusy()">Keep supplier</button><button class="dash-secondary supplier-remove-button" type="button" (click)="deletePrivateSupplier(supplier)" [disabled]="supplierDeleteBusy()">{{ supplierDeleteBusy() ? 'Removing…' : 'Remove supplier' }}</button>
+              </div>}
+            }</div>}
+          </section>
+          </div>
+        }
+      } @else {
+        <div class="dash-title"><div><p>YOUR PRIVATE WORKSPACE</p><h1>History</h1><span>Look up completed requests and confirmed payments by date and amount.</span></div><button class="dash-secondary" type="button" (click)="openActivity()" [disabled]="activityLoading()">{{ activityLoading() ? 'Refreshing…' : 'Refresh history' }}</button></div>
+        @if (instructionError()) {<p class="instruction-error" role="alert">{{ instructionError() }}</p>}
+        <p class="instruction-safety-note">LOCAL FIXTURE ONLY. These synthetic quotes are not vendor offers. Approvals record a test decision only; no order is placed and no money moves.</p>
+        @if (activityLoading()) {<p class="dash-loading">Loading history…</p>}
+        @if (activity().operations.length === 0 && activity().notifications.length === 0 && activity().observations.length === 0) {<div class="dash-empty"><span class="dash-stat-icon">◷</span><div><strong>No payment history yet</strong><p>Confirmed payment amount, date, and method will appear here after a supported provider confirms a transaction.</p></div></div>}
+        @if (activity().operations.length > 0) {<section class="dash-instructions"><div class="dash-section-title"><div><h2>Past requests</h2><p>Each row shows the date, quoted amount, and whether a payment actually occurred.</p></div></div><div class="dash-list">@for (operation of activity().operations; track operation.id) {<article><span class="dash-item-icon">◷</span><div class="activity-item"><h3>{{ operation.description }} <span>{{ operation.state.replaceAll('_', ' ') }}</span></h3><p>{{ historyDate(operation.createdAt) }} · {{ operation.category }} · {{ operation.mode.replaceAll('_', ' ') }}</p><p><strong>Quoted amount:</strong> {{ historyAmount(operation) }} <span class="history-payment-status">{{ historyPaymentStatus(operation) }}</span></p>@if (operation.quoteDetails?.label) {<small>{{ operation.quoteDetails?.label }}</small>}@if (operation.approvalStatus === 'PENDING') {<div class="instruction-form-actions"><button class="dash-secondary" type="button" (click)="decideFixtureApproval(operation, 'REJECT')" [disabled]="fixtureActivationId() === operation.approvalId">Reject fixture quote</button><button class="dash-primary" type="button" (click)="decideFixtureApproval(operation, 'APPROVE')" [disabled]="fixtureActivationId() === operation.approvalId">{{ fixtureActivationId() === operation.approvalId ? 'Saving…' : 'Approve fixture review' }}</button></div>}@if (operation.approvalStatus === 'APPROVED') {<small>Your review was recorded; no real purchase occurred.</small>}</div></article>}</div></section>}
+        @if (activity().notifications.length > 0) {<section class="dash-instructions"><div class="dash-section-title"><div><h2>Past notifications</h2><p>Notifications previously sent to your account.</p></div></div><div class="dash-list">@for (notification of activity().notifications; track notification.id) {<article><span class="dash-item-icon">•</span><div><h3>{{ notification.content.label ?? notification.type.replaceAll('_', ' ') }}</h3><p>{{ historyDate(notification.createdAt) }} · {{ notification.content.message }}</p></div></article>}</div></section>}
+        @if (activity().observations.length > 0) {<section class="dash-instructions"><div class="dash-section-title"><div><h2>Past offer checks</h2><p>These entries are synthetic fixture data and do not verify real offers.</p></div></div><div class="dash-list">@for (observation of activity().observations; track observation.id) {<article><span class="dash-item-icon">◷</span><div><h3>{{ observation.details.label }}</h3><p>{{ historyDate(observation.observedAt) }} · {{ observation.details.category }} · {{ observation.details.fixture ? 'Local fixture only' : 'Unverified' }}</p></div></article>}</div></section>}
+      }
+    </main>
+  </div>
+  } @else {
+    <div class="auth-screen">
+      <header class="auth-header"><a class="wordmark" href="#top" (click)="closeWorkspace()"><span class="brand-mark">a</span><span>a-p-p-a-i</span></a><button type="button" class="auth-back" (click)="closeWorkspace()">Back to website</button></header>
+      <main class="auth-card">
+        <p class="eyebrow">PRIVATE MEMBER AREA</p>
+        @if (memberAuthState() === 'checking') {
+          <h1>Checking your session…</h1><p class="auth-subtitle">Connecting securely to your member workspace.</p>
+        } @else if (memberAuthState() === 'unavailable') {
+          <h1>Member access is unavailable.</h1><p class="auth-subtitle">The local authentication service could not be reached.</p><p class="auth-error" role="alert">{{ authError() }}</p><button class="button button-primary auth-submit" type="button" (click)="openWorkspace()">Try again</button>
+        } @else {
+          <h1>{{ authMode() === 'sign-in' ? 'Sign in to Appai.' : 'Create your member account.' }}</h1>
+          <p class="auth-subtitle">{{ authMode() === 'sign-in' ? 'Your procurement workspace, kept private to you.' : 'Use the invitation code you received to join Appai.' }}</p>
+          <form class="auth-form" (ngSubmit)="submitMemberAuth()">
+            @if (authMode() === 'sign-up') {<label for="member-name">Name</label><input id="member-name" name="name" [(ngModel)]="name" autocomplete="name" required maxlength="120" />}
+            <label for="member-email">Email</label><input id="member-email" name="email" type="email" [(ngModel)]="email" autocomplete="email" required maxlength="254" />
+            <label for="member-password">Password</label><input id="member-password" name="password" type="password" [(ngModel)]="password" [attr.autocomplete]="authMode() === 'sign-in' ? 'current-password' : 'new-password'" [attr.minlength]="authMode() === 'sign-up' ? 12 : null" required />
+            @if (authMode() === 'sign-up') {<label for="invite-code">Invitation code</label><input id="invite-code" name="inviteCode" type="password" [(ngModel)]="inviteCode" autocomplete="off" required />}
+            @if (authError()) {<p class="auth-error" role="alert">{{ authError() }}</p>}
+            <button class="button button-primary auth-submit" type="submit" [disabled]="authBusy()">{{ authBusy() ? 'Please wait…' : authMode() === 'sign-in' ? 'Sign in' : 'Create account' }}</button>
+          </form>
+          <div class="auth-switch">{{ authMode() === 'sign-in' ? 'Have an invitation?' : 'Already have an account?' }} <button type="button" (click)="setAuthMode(authMode() === 'sign-in' ? 'sign-up' : 'sign-in')">{{ authMode() === 'sign-in' ? 'Create account' : 'Sign in' }}</button></div>
+          <p class="auth-note">Sign-in credentials are handled by the authentication service. No purchasing action is taken by opening this workspace.</p>
+        }
+      </main>
+    </div>
+  }
+} @else {
+<main>
+  <div class="dark-stage">
+  <div class="announcement"><span class="announcement-dot"></span> A programmable control plane for the important things <span class="arrow-icon">↗</span></div>
+
+  <header class="site-header container">
+    <a class="wordmark" href="#top" aria-label="A-P-P-A-I home"><span class="brand-mark">a</span><span>a-p-p-a-i</span></a>
+    <nav class="desktop-nav" aria-label="Primary navigation">
+      <a href="#how-it-works">How it works</a>
+      <a href="#how-it-works" (click)="homePanel.set('control')">Your control</a>
+      <a href="#how-it-works" (click)="homePanel.set('needs')">What it handles</a>
+    </nav>
+    <button class="header-action" type="button" (click)="openWorkspace()">Member sign in <span class="arrow-icon">↗</span></button>
+  </header>
+
+  <section class="hero container" id="top">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="eyebrow-line"></span> YOUR PERSONAL PROCUREMENT ASSISTANT</p>
+      <h1>Set the need.<br /><em>Keep the control.</em></h1>
+      <div class="hero-actions"><button class="button button-primary" type="button" (click)="openWorkspace()">Member sign in <span class="arrow-icon">↗</span></button></div>
+    </div>
+
+    <div class="hero-visual">
+      <div class="visual-orbit orbit-one"></div><div class="visual-orbit orbit-two"></div>
+      <div class="preview-shell" aria-label="A-P-P-A-I product preview">
+        <div class="preview-topbar"><div class="preview-brand"><span class="brand-mark mini-mark">a</span><span>YOUR WORKSPACE</span></div><span class="preview-status">ILLUSTRATIVE EXAMPLE</span></div>
+        <div class="preview-body">
+          <div class="preview-kicker">YOUR INSTRUCTION</div>
+          <div class="preview-title-row"><div><h3>Find a stay in Arusha</h3><p>2 guests · 4 nights</p></div></div>
+          <div class="preview-rule"></div>
+          <div class="preview-details"><div><span>Budget ceiling</span><strong>TZS 1,200,000</strong></div><div><span>Permission</span><strong>Ask me first</strong></div></div>
+          <div class="preview-match"><div class="match-topline"><span class="match-label">EXAMPLE OFFER</span></div><div class="match-content"><div class="match-avatar">⌂</div><div><strong>Ready to review</strong><span>Terms to be confirmed</span></div><b>TZS 980k</b></div></div>
+        </div>
+        <div class="preview-footer"><span>Illustrative workspace</span><span>Review required</span></div>
+      </div>
+    </div>
+    <div class="hero-aside"><span>PERSONAL PROCUREMENT</span><p>Give your assistant a clear brief. Decide when it should ask, act, or simply keep you informed.</p><a href="#how-it-works">See how it works ↗</a></div>
+  </section>
+  </div>
+
+  <section class="trust-strip"><div class="container trust-inner"><p>DESIGNED AROUND THE MOMENTS THAT NEED CARE</p><div class="trust-items"><span><span class="trust-symbol">◌</span> Specific instructions</span><span><span class="trust-symbol">⌁</span> Verified totals</span><span><span class="trust-symbol">◷</span> Durable decisions</span><span><span class="trust-symbol">⊙</span> Clear recovery</span></div></div></section>
+
+  <section class="deck-section container" id="how-it-works">
+    <div class="deck-heading"><p class="eyebrow">A CLEARER WAY TO STAY AHEAD</p><h2>One assistant. Your rules.</h2><p>From an upcoming stay to a recurring purchase, Appai helps you move from a need to a considered next step.</p></div>
+    <div class="deck-tabs" role="group" aria-label="Explore Appai">
+      <button type="button" [class.active]="homePanel() === 'how'" [attr.aria-pressed]="homePanel() === 'how'" (click)="homePanel.set('how')">How it works</button>
+      <button type="button" [class.active]="homePanel() === 'control'" [attr.aria-pressed]="homePanel() === 'control'" (click)="homePanel.set('control')">Your control</button>
+      <button type="button" [class.active]="homePanel() === 'needs'" [attr.aria-pressed]="homePanel() === 'needs'" (click)="homePanel.set('needs')">What it handles</button>
+    </div>
+    <div class="deck-panel" aria-live="polite">
+      @if (homePanel() === 'how') {
+        <div class="deck-copy"><span class="deck-kicker">01 / THE PROCESS</span><h3>Tell it once.<br>Stay in the loop.</h3><p>Describe what you need, set a budget and timing, then choose the permission that fits. Your workspace brings the next step into view.</p><button class="deck-link" type="button" (click)="openWorkspace()">Member sign in ↗</button></div>
+        <div class="deck-visual"><div class="deck-step"><span>01</span><div><strong>Describe the need</strong><small>What, when, and how much</small></div></div><div class="deck-step"><span>02</span><div><strong>Set your boundaries</strong><small>Choose the permission and limits</small></div></div><div class="deck-step"><span>03</span><div><strong>See the next step</strong><small>Review the details in one place</small></div></div></div>
+      } @else if (homePanel() === 'control') {
+        <div class="deck-copy"><span class="deck-kicker">02 / PERMISSION</span><h3>Decide how much<br>to delegate.</h3><p>Choose to be notified, review first, or allow action within approved rules. A budget alone never grants permission.</p><button class="deck-link" type="button" (click)="openWorkspace()">Member sign in ↗</button></div>
+        <div class="deck-visual"><div class="deck-step"><span>◉</span><div><strong>Ask me first</strong><small>Review an offer before a purchase</small></div></div><div class="deck-step"><span>◇</span><div><strong>Act within my rules</strong><small>Use the authority you explicitly set</small></div></div><div class="deck-step"><span>○</span><div><strong>Notify only</strong><small>Receive updates without purchasing</small></div></div></div>
+      } @else {
+        <div class="deck-copy"><span class="deck-kicker">03 / YOUR NEEDS</span><h3>Different needs.<br>One clear view.</h3><p>Bring purchases, bills, and stays into a consistent workflow, with the details that matter for each.</p><button class="deck-link" type="button" (click)="openWorkspace()">Member sign in ↗</button></div>
+        <div class="deck-visual"><div class="deck-step"><span>▱</span><div><strong>Products</strong><small>Quantity, delivery and total</small></div></div><div class="deck-step"><span>▤</span><div><strong>Bills</strong><small>Account, due date and status</small></div></div><div class="deck-step"><span>⌂</span><div><strong>Stays</strong><small>Dates, guests and cancellation terms</small></div></div><small class="deck-note">Provider support is still being established.</small></div>
+      }
+    </div>
+  </section>
+  <section class="deck-cta"><div class="container deck-cta-inner"><div><p class="eyebrow light">START WITH ONE THING</p><h2>A little less to remember.<br>A lot more in your control.</h2></div><div><p>Sign in to your private member workspace.</p><button class="button button-light" type="button" (click)="openWorkspace()">Member sign in ↗</button><small>Invitation required to create an account.</small></div></div></section>
+
+  <footer class="site-footer"><div class="container footer-inner"><a class="wordmark footer-mark" href="#top"><span class="brand-mark">a</span><span>a-p-p-a-i</span></a><p>Personal procurement, with your permission.</p><div class="footer-links"><a href="#how-it-works">Explore Appai</a><button type="button" (click)="openWorkspace()">Member sign in</button></div></div></footer>
+</main>
+}

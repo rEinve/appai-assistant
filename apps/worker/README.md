@@ -1,0 +1,9 @@
+# Durable worker
+
+The worker is a separate process from the Angular UI and API. `npm start` builds and runs it with the local PostgreSQL database. `WORKER_ID`, `WORKER_POLL_MS`, `WORKER_LEASE_MS`, and `WORKER_BATCH_SIZE` are optional local tuning settings. The worker publishes a PostgreSQL heartbeat used by fixture activation readiness.
+
+The authenticated API can activate ready instructions in explicitly labeled FIXTURE mode. The worker scans due one-time, dated, monthly bill, and notify-only watch instructions. It creates deduplicated jobs and transactionally advances monthly schedules. Jobs are claimed with `FOR UPDATE SKIP LOCKED`, lease owner, expiry and increasing lease generation. Every completion checks the current generation, so a stale process cannot acknowledge work reclaimed by a newer worker. Transient failures retry with bounded exponential backoff and end in `DEAD` after `max_attempts`.
+
+`RUN_OCCURRENCE` validates payload and owner/instruction state, creates unique occurrence, obligation and purchase-operation identities, then records an immutable deterministic synthetic quote. REVIEW_REQUIRED creates a quote-bound local approval; PRE_APPROVED records `FIXTURE_COMPLETED`. Neither decision sends an order or payment. NOTIFY_ONLY watch jobs create clearly marked synthetic observations, never real search results. The fixture adapter is rechecked as execution-disabled before processing.
+
+Run `npm run test:m1:workflow` for the PostgreSQL-backed fixture workflow, including owner isolation, quote immutability, stale approval rejection, expired-lease recovery, recurrence, and pause/resume/revoke. Outbox events are persisted transactionally; external notification delivery and real vendor/payment capability remain outside this fixture milestone. Do not insert real credentials or enable financial execution to exercise this worker.
