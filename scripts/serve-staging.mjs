@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { join, extname, normalize } from 'node:path';
 
 const port = Number(process.env['STAGING_PORT'] ?? 4200);
-const host = '0.0.0.0';
+const host = '::';
 const root = join(process.cwd(), 'dist', 'appai-website');
 
 const mimeTypes = {

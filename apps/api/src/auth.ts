@@ -72,6 +72,10 @@ export function createAuthRuntime(): AuthRuntime {
       useSecureCookies: process.env['NODE_ENV'] === 'production',
       disableCSRFCheck: false,
       disableOriginCheck: false,
+      ipAddress: {
+        ipAddressHeaders: ['cf-connecting-ip', 'x-real-ip', 'x-forwarded-for'],
+        trustedProxies: ['127.0.0.1', '::1'],
+      },
     },
     databaseHooks: {
       user: {
