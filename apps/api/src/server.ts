@@ -71,7 +71,13 @@ function validTimezone(value: unknown): value is string {
 
 function localDateTimeToInstant(value: unknown, timezone: string): Date | null {
   if (typeof value !== 'string') return null;
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  let normalized = value.trim();
+  if (normalized.includes('T')) {
+    normalized = normalized.slice(0, 16);
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    normalized += 'T09:00';
+  }
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
   if (!match || !validTimezone(timezone)) return null;
   const [, yearText, monthText, dayText, hourText, minuteText] = match;
   const desired = { year: Number(yearText), month: Number(monthText), day: Number(dayText), hour: Number(hourText), minute: Number(minuteText) };
@@ -398,7 +404,8 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       const mode = input['mode'] ?? 'REVIEW_REQUIRED';
       const memberCategory = input['memberCategory'] ?? 'OTHER';
       const budgetId = input['budgetId'] === null || input['budgetId'] === undefined || input['budgetId'] === '' ? null : input['budgetId'];
-      const maximumTotal = typeof input['maximumTotal'] === 'string' ? input['maximumTotal'].trim() : '';
+      const rawMaximum = typeof input['maximumTotal'] === 'string' ? input['maximumTotal'].trim() : '';
+      const maximumTotal = rawMaximum.replace(/,/g, '');
       let validFromLocal = typeof input['validFromLocal'] === 'string' ? input['validFromLocal'] : '';
       let validUntilLocal = typeof input['validUntilLocal'] === 'string' ? input['validUntilLocal'] : '';
       if (!validFromLocal && typeof input['resolvedStartDate'] === 'string') {
@@ -412,6 +419,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       const paymentRail = typeof input['paymentRail'] === 'string' && input['paymentRail'].trim() ? input['paymentRail'].trim() : 'PAYPAL';
       const requirements = typeof input['requirements'] === 'string' ? input['requirements'].trim() : null;
       const intent = typeof input['intent'] === 'string' ? input['intent'].trim() : null;
+      const suggestedBudget = typeof input['suggestedBudget'] === 'string' && input['suggestedBudget'].trim() ? input['suggestedBudget'].trim().slice(0, 500) : null;
       const recommendations = Array.isArray(input['recommendations']) ? input['recommendations'] : [];
       if (!kinds.includes(String(kind)) || (category !== null && !categories.includes(String(category))) || !modes.includes(String(mode)) || !['PERSONAL', 'HOUSEHOLD', 'WORK', 'TRAVEL', 'OTHER'].includes(String(memberCategory)) || normalizedDescription.length < 3 || description.length > 2000) {
         return json(response, 400, {
@@ -428,7 +436,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       }
 
       const routeScope = 'POST /api/v1/instructions';
-      if (maximumTotal.length > 40) return json(response, 400, { code: 'INVALID_MAXIMUM_TOTAL' });
+      if (maximumTotal.length > 40) return json(response, 400, { code: 'INVALID_MAXIMUM_TOTAL', message: 'Enter a valid maximum total.' });
       const requestHash = createHash('sha256').update(JSON.stringify({
         kind, category, mode, memberCategory, description, budgetId, maximumTotal, validFromLocal, validUntilLocal,
       })).digest('hex');
@@ -528,6 +536,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           ...(title ? { title } : {}),
           ...(directive ? { directive } : {}),
           paymentRail,
+          ...(suggestedBudget ? { suggestedBudget } : {}),
           ...(requirements ? { requirements } : {}),
           ...(intent ? { intent } : {}),
           ...(recommendations.length > 0 ? { recommendations } : {}),
@@ -666,7 +675,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       const input = await body(request);
       const promptText = typeof input['description'] === 'string' ? input['description'] : '';
       const memberCategory = input['memberCategory'];
-      if (promptText.trim().length < 3 || promptText.length > 500) return json(response, 400, { code: 'INVALID_PROMPT', message: 'Enter an instruction between 3 and 500 characters.' });
+      if (promptText.trim().length < 3 || promptText.length > 2000) return json(response, 400, { code: 'INVALID_PROMPT', message: 'Enter an instruction between 3 and 2,000 characters.' });
       if (!['PERSONAL', 'HOUSEHOLD', 'WORK', 'TRAVEL', 'OTHER'].includes(String(memberCategory))) return json(response, 400, { code: 'INVALID_MEMBER_CATEGORY', message: 'Choose a valid instruction area.' });
       const timezone = typeof input['timezone'] === 'string' ? input['timezone'].trim() : '';
       if (!validTimezone(timezone)) return json(response, 400, { code: 'INVALID_INSTRUCTION_TIMEZONE', message: 'Choose a valid IANA timezone for this instruction.' });
@@ -674,7 +683,8 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       const validUntil = input['validUntilLocal'] ? localDateTimeToInstant(input['validUntilLocal'], timezone) : null;
       if ((input['validFromLocal'] && !validFrom) || (input['validUntilLocal'] && !validUntil)) return json(response, 400, { code: 'INVALID_VALIDITY_TIME', message: 'Enter a real local date and time in the selected timezone. Daylight-saving gaps are not valid times.' });
       if (validFrom && validUntil && validUntil <= validFrom) return json(response, 400, { code: 'INVALID_VALIDITY_WINDOW', message: 'The end of the validity window must be after its start.' });
-      const maximumTotal = typeof input['maximumTotal'] === 'string' ? input['maximumTotal'].trim() : '';
+      const rawMaximum = typeof input['maximumTotal'] === 'string' ? input['maximumTotal'].trim() : '';
+      const maximumTotal = rawMaximum.replace(/,/g, '');
       if (maximumTotal.length > 40) return json(response, 400, { code: 'INVALID_MAXIMUM_TOTAL', message: 'Enter a positive maximum total.' });
 
       const db = await authRuntime.pool.connect();

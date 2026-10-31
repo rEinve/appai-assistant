@@ -1233,14 +1233,15 @@ export class AppComponent implements OnInit {
           description: this.instructionDescription,
           memberCategory: this.instructionMemberCategory,
           budgetId: this.instructionBudgetId || null,
-          maximumTotal: this.instructionMaximumTotal.trim() || (proposal?.suggestedBudget ?? ''),
-          validFromLocal: this.instructionValidFromLocal || (proposal?.resolvedStartDate ?? ''),
-          validUntilLocal: this.instructionValidUntilLocal || (proposal?.resolvedEndDate ?? ''),
+          maximumTotal: this.instructionMaximumTotal.trim() || (proposal?.maximumTotal ?? ''),
+          validFromLocal: this.instructionValidFromLocal || (proposal?.validFromLocal ?? proposal?.resolvedStartDate ?? ''),
+          validUntilLocal: this.instructionValidUntilLocal || (proposal?.validUntilLocal ?? proposal?.resolvedEndDate ?? ''),
           title: proposal?.instructionTitle || null,
           directive: proposal?.directive || null,
           paymentRail: 'PAYPAL',
           intent: proposal?.intent || null,
           requirements: proposal?.requirements || null,
+          suggestedBudget: proposal?.suggestedBudget || null,
           recommendations: proposal?.recommendations || [],
         },
         { withCredentials: true, headers: { 'Idempotency-Key': this.draftIdempotencyKey } },
@@ -1256,6 +1257,7 @@ export class AppComponent implements OnInit {
       this.dashboardView.set('Instructions');
       await this.loadInstructions();
     } catch (error) {
+      this.draftIdempotencyKey = '';
       this.instructionError.set(this.errorMessage(error, 'We could not save this draft. Please try again.'));
     } finally {
       this.instructionSaving.set(false);
