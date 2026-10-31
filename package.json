@@ -4,7 +4,10 @@
   "private": true,
   "scripts": {
     "start": "node --env-file-if-exists=.env scripts/start-local.mjs",
-    "start:web": "ng serve --host 0.0.0.0 --disable-host-check --live-reload=false",
+    "start:web": "node scripts/serve-staging.mjs",
+    "start:dev": "ng serve --port 4201 --host 0.0.0.0",
+    "dev": "ng serve --port 4201 --host 0.0.0.0",
+    "stage": "npm run build",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "build:domain": "tsc -p tsconfig.domain.json",

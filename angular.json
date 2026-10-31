@@ -42,7 +42,8 @@
         "serve": {
           "builder": "@angular-devkit/build-angular:dev-server",
           "options": {
-            "liveReload": false,
+            "port": 4201,
+            "host": "0.0.0.0",
             "disableHostCheck": true,
             "allowedHosts": ["all"]
           },

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Pool } from 'pg';
@@ -120,7 +121,14 @@ try {
   const workerFile = `${root}/dist/worker/apps/worker/src/worker.js`;
   const worker = spawn(node, ['--env-file-if-exists=.env', workerFile], { cwd: root, env: process.env, stdio: 'inherit' });
   children.add(worker);
-  console.log('Member API and durable worker are ready. Starting the website at http://localhost:4200.');
+
+  if (!existsSync(`${root}/dist/appai-website/index.html`)) {
+    console.log('Building website production bundle for live testing…');
+    await run(npm, ['run', 'build'], 'Website build');
+  }
+
+  console.log('Member API and durable worker are ready. Live testing site at http://localhost:4200 (tunnel & Nginx).');
+  console.log('For active development with hot-reload, run: npm run dev (http://localhost:4201).');
 
   const web = spawn(npm, ['run', 'start:web'], { cwd: root, env: process.env, stdio: 'inherit' });
   children.add(web);

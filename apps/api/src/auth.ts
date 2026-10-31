@@ -35,7 +35,7 @@ export function createAuthRuntime(): AuthRuntime {
 
   const pool = new Pool({ connectionString: databaseUrl, max: 10, connectionTimeoutMillis: 5000 });
   const extraOrigins = (process.env['TRUSTED_ORIGINS'] ?? '').split(',').map((o) => o.trim()).filter(Boolean);
-  const trustedOrigins = Array.from(new Set([webOrigin, 'https://appai.local', 'https://appai.themeshak.com', ...extraOrigins]));
+  const trustedOrigins = Array.from(new Set([webOrigin, 'http://localhost:4201', 'https://appai.local', 'https://appai.themeshak.com', ...extraOrigins]));
   const auth = betterAuth({
     appName: 'A-P-P-A-I',
     baseURL,
