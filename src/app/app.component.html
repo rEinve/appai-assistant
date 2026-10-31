@@ -50,14 +50,14 @@
             @if (instructionLoading()) {<p class="dash-loading">Loading instructions…</p>}
             <nav class="instruction-history-groups" aria-label="Saved instructions">
               <div class="instruction-history-group"><p class="instruction-history-label">Recent</p>
-                @if (recentInstructions().length) {@for (instruction of recentInstructions(); track instruction.id) {<button type="button" class="instruction-history-item" [class.selected]="selectedInstruction()?.id === instruction.id" (click)="selectInstruction(instruction)"><strong>{{ instruction.promptText || instruction.structuredConstraints.description }}</strong><small>{{ memberCategoryLabel(instruction.memberCategory) }} · {{ instruction.state.toLowerCase() }}</small></button>}}
+                @if (recentInstructions().length) {@for (instruction of recentInstructions(); track instruction.id) {<button type="button" class="instruction-history-item" [class.selected]="selectedInstruction()?.id === instruction.id" (click)="selectInstruction(instruction)"><strong>{{ instruction.structuredConstraints.title || instruction.promptText || instruction.structuredConstraints.description }}</strong><small>{{ memberCategoryLabel(instruction.memberCategory) }} · {{ instruction.state.toLowerCase() }}</small></button>}}
                 @else {<p class="instruction-history-empty">Your saved instructions will appear here.</p>}
               </div>
               @for (category of memberCategories; track category.id) {
                 <div class="instruction-history-group">
                   <div class="instruction-category-row"><button type="button" class="instruction-category-toggle" [attr.aria-expanded]="expandedInstructionCategories()[category.id]" (click)="toggleInstructionCategory(category.id)"><span>{{ category.label }}</span><small>{{ instructionsForCategory(category.id).length }}</small><span class="instruction-category-chevron" aria-hidden="true">{{ expandedInstructionCategories()[category.id] ? '⌄' : '›' }}</span></button><button type="button" class="instruction-category-add" [attr.aria-label]="'New ' + category.label.toLowerCase() + ' instruction'" [title]="'New ' + category.label.toLowerCase() + ' instruction'" (click)="startNewInstruction(category.id)">+</button></div>
                   @if (expandedInstructionCategories()[category.id]) {
-                    @if (instructionsForCategory(category.id).length) {@for (instruction of instructionsForCategory(category.id); track instruction.id) {<button type="button" class="instruction-history-item instruction-category-item" [class.selected]="selectedInstruction()?.id === instruction.id" (click)="selectInstruction(instruction)"><strong>{{ instruction.promptText || instruction.structuredConstraints.description }}</strong><small>{{ instruction.state.toLowerCase() }}{{ instruction.budgetId ? ' · ' + budgetLabel(instruction.budgetId) : '' }}</small></button>}}
+                    @if (instructionsForCategory(category.id).length) {@for (instruction of instructionsForCategory(category.id); track instruction.id) {<button type="button" class="instruction-history-item instruction-category-item" [class.selected]="selectedInstruction()?.id === instruction.id" (click)="selectInstruction(instruction)"><strong>{{ instruction.structuredConstraints.title || instruction.promptText || instruction.structuredConstraints.description }}</strong><small>{{ instruction.state.toLowerCase() }}{{ instruction.budgetId ? ' · ' + budgetLabel(instruction.budgetId) : '' }}</small></button>}}
                     @else {<p class="instruction-history-empty">No {{ category.label.toLowerCase() }} instructions yet.</p>}
                   }
                 </div>
@@ -71,51 +71,104 @@
             <div class="instruction-chat-body">
               <div #chatThread class="instruction-chat-thread" aria-live="polite">
                 @if (selectedInstruction(); as selected) {
-                  <p class="chat-message assistant">You’re looking at this saved instruction. You can continue refining the wording, area, and budget here.</p>
-                  <div class="chat-message member">
-                    <span>{{ selected.promptText || selected.structuredConstraints.description }}</span>
-                    @if (selected.state === 'DRAFT') {
-                      <button type="button" class="dash-text-button edit-prompt-btn" (click)="editCurrentWording()">Edit wording</button>
+                  <div class="instruction-saved-ticket">
+                    <div class="ticket-badge-row">
+                      <span class="ticket-badge">✦ Saved Instruction</span>
+                      <span class="ticket-rail-pill">Rail: PayPal Verified</span>
+                      <span class="instruction-state-pill">{{ selected.state.replace('_', ' ') }}</span>
+                    </div>
+                    <h3 class="ticket-title">{{ selected.structuredConstraints.title || selected.promptText || 'Procurement Instruction' }}</h3>
+                    @if (selected.structuredConstraints.directive) {
+                      <p class="ticket-directive"><strong>Directive:</strong> {{ selected.structuredConstraints.directive }}</p>
                     }
+                    <div class="ticket-meta-grid">
+                      <div class="ticket-meta-item">
+                        <small>Area / Category</small>
+                        <strong>{{ memberCategoryLabel(selected.memberCategory) }}</strong>
+                      </div>
+                      <div class="ticket-meta-item">
+                        <small>Target Window / Timing</small>
+                        <strong>{{ selected.validFrom ? plannerTime(selected.validFrom) + ' (' + calendarDateLabel(calendarDateKey(selected.validFrom)) + ')' : (selected.createdAt ? calendarDateLabel(calendarDateKey(selected.createdAt)) : 'Anytime') }}</strong>
+                      </div>
+                      <div class="ticket-meta-item">
+                        <small>Spending Limit</small>
+                        <strong>{{ selected.maxTotalMinor ? minorUnitsToDisplay(selected.maxTotalMinor, selected.currency) : 'Market rate discovery' }}</strong>
+                      </div>
+                      <div class="ticket-meta-item">
+                        <small>Original Prompt</small>
+                        <span class="ticket-prompt-preview">{{ selected.promptText || selected.structuredConstraints.description || 'N/A' }}</span>
+                      </div>
+                    </div>
+
+                    @if (selected.structuredConstraints.recommendations; as recs) {
+                      @if (recs.length > 0) {
+                        <div class="ticket-scouted-recs">
+                          <small class="scouted-label">Scouted Providers (PayPal Eligible):</small>
+                          <div class="ticket-recs-list">
+                            @for (rec of recs; track $index) {
+                              <div class="ticket-rec-item">
+                                <div class="rec-name-row">
+                                  <strong>{{ rec.name }}</strong>
+                                  <div class="scouted-badges">
+                                    @if (rec.paypalAccepted) {
+                                      <span class="paypal-pill" title="Accepts PayPal payment">✓ PayPal</span>
+                                    }
+                                    @if (rec.rate) { <span class="rec-rate">{{ rec.rate }}</span> }
+                                  </div>
+                                </div>
+                                @if (rec.notes) { <p class="rec-notes">{{ rec.notes }}</p> }
+                              </div>
+                            }
+                          </div>
+                        </div>
+                      }
+                    }
+
+                    <div class="ticket-actions-row">
+                      <button type="button" class="dash-primary ticket-action-btn" (click)="viewInstructionInPlanner(selected)">
+                        📅 View in Planner
+                      </button>
+                      <button type="button" class="dash-secondary ticket-action-btn" (click)="startNewInstruction()">
+                        + New Instruction
+                      </button>
+                      @if (selected.state === 'DRAFT') {
+                        <button type="button" class="dash-secondary ticket-action-btn" (click)="requestDiscardInstruction(selected)">
+                          Delete draft
+                        </button>
+                      }
+                    </div>
                   </div>
+
                   @if (selected.state !== 'DRAFT') {
-                    <p class="chat-message assistant">This instruction is {{ selected.state.toLowerCase() }} and can’t be edited here. You can review its details below or revoke it to stop future activity.</p>
+                    <p class="chat-message assistant">This instruction is {{ selected.state.toLowerCase() }} and can’t be edited here. You can revoke it to stop future activity.</p>
                     @if (selected.state === 'ACTIVE' || selected.state === 'PAUSED') {
                       <div class="instruction-form-actions">
                         <button class="dash-secondary" type="button" (click)="changeInstructionLifecycle(selected, selected.state === 'ACTIVE' ? 'pause' : 'resume')" [disabled]="fixtureActivationId()">{{ selected.state === 'ACTIVE' ? 'Pause fixture' : 'Resume fixture' }}</button>
                         <button class="dash-secondary" type="button" (click)="requestDiscardInstruction(selected)">Revoke instruction</button>
                       </div>
                     }
-                    @if (instructionDeleteConfirmId() === selected.id) {
-                      <div class="instruction-delete-confirm" role="group" aria-label="Confirm instruction removal">
-                        <p>Revoke this instruction and stop future activity? The audit record will be retained.</p>
-                        <button class="dash-secondary" type="button" (click)="instructionDeleteConfirmId.set(null)">Keep it</button>
-                        <button class="dash-primary" type="button" (click)="discardInstruction(selected)" [disabled]="fixtureActivationId()">Revoke instruction</button>
-                      </div>
-                    }
-                  } @else {
-                    @if (instructionDeleteConfirmId() === selected.id) {
-                      <div class="instruction-delete-confirm" role="group" aria-label="Confirm draft removal">
-                        <p>Remove this draft from your list? Its audit record will be retained.</p>
-                        <button class="dash-secondary" type="button" (click)="instructionDeleteConfirmId.set(null)">Keep draft</button>
-                        <button class="dash-primary" type="button" (click)="discardInstruction(selected)" [disabled]="fixtureActivationId()">Delete draft</button>
-                      </div>
-                    }
-                    @if (selected.executionEnvironment === 'FIXTURE') {
-                      @if (readinessReports()[selected.id]; as report) {
-                        <section class="readiness-report" aria-live="polite">
-                          <strong>{{ report.canActivateFixture ? 'Ready for a local fixture run' : 'Fixture run is blocked' }}</strong>
-                          <p class="fixture-label">{{ report.fixtureLabel }}</p>
-                          @if (report.fixtureBlockers.length > 0) {
-                            <ul>@for (blocker of report.fixtureBlockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul>
-                          } @else {
-                            <button class="dash-secondary readiness-button" type="button" (click)="activateFixture(selected)" [disabled]="fixtureActivationId() === selected.id">{{ fixtureActivationId() === selected.id ? 'Starting fixture…' : 'Start fixture-only run' }}</button>
-                          }
-                          <details><summary>Why real purchasing is unavailable</summary><ul>@for (blocker of report.blockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul></details>
-                        </section>
-                      } @else {
-                        <button class="dash-secondary" type="button" (click)="checkActivationReadiness(selected.id)" [disabled]="readinessLoadingId() === selected.id">{{ readinessLoadingId() === selected.id ? 'Checking fixture readiness…' : 'Check fixture readiness' }}</button>
-                      }
+                  }
+                  @if (instructionDeleteConfirmId() === selected.id) {
+                    <div class="instruction-delete-confirm" role="group" aria-label="Confirm instruction removal">
+                      <p>Revoke or delete this instruction? The audit record will be retained.</p>
+                      <button class="dash-secondary" type="button" (click)="instructionDeleteConfirmId.set(null)">Keep it</button>
+                      <button class="dash-primary" type="button" (click)="discardInstruction(selected)" [disabled]="fixtureActivationId()">Confirm removal</button>
+                    </div>
+                  }
+                  @if (selected.executionEnvironment === 'FIXTURE') {
+                    @if (readinessReports()[selected.id]; as report) {
+                      <section class="readiness-report" aria-live="polite">
+                        <strong>{{ report.canActivateFixture ? 'Ready for a local fixture run' : 'Fixture run is blocked' }}</strong>
+                        <p class="fixture-label">{{ report.fixtureLabel }}</p>
+                        @if (report.fixtureBlockers.length > 0) {
+                          <ul>@for (blocker of report.fixtureBlockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul>
+                        } @else {
+                          <button class="dash-secondary readiness-button" type="button" (click)="activateFixture(selected)" [disabled]="fixtureActivationId() === selected.id">{{ fixtureActivationId() === selected.id ? 'Starting fixture…' : 'Start fixture-only run' }}</button>
+                        }
+                        <details><summary>Why real purchasing is unavailable</summary><ul>@for (blocker of report.blockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul></details>
+                      </section>
+                    } @else {
+                      <button class="dash-secondary" type="button" (click)="checkActivationReadiness(selected.id)" [disabled]="readinessLoadingId() === selected.id">{{ readinessLoadingId() === selected.id ? 'Checking fixture readiness…' : 'Check fixture readiness' }}</button>
                     }
                   }
                 } @else {
@@ -178,7 +231,12 @@
                           <div class="scouted-item">
                             <div class="scouted-top">
                               <strong>{{ rec.name }}</strong>
-                              @if (rec.rate) { <span class="scouted-rate">{{ rec.rate }}</span> }
+                              <div class="scouted-badges">
+                                @if (rec.paypalAccepted) {
+                                  <span class="paypal-pill" title="Accepts PayPal payment">✓ PayPal</span>
+                                }
+                                @if (rec.rate) { <span class="scouted-rate">{{ rec.rate }}</span> }
+                              </div>
                             </div>
                             @if (rec.notes) { <p class="scouted-notes">{{ rec.notes }}</p> }
                           </div>
@@ -316,13 +374,19 @@
           } @else {
             <div class="planner-day-agenda">
               @if (calendarSelectedEntries().length) {
-                <ol class="planner-agenda-list">@for (entry of calendarSelectedEntries(); track entry.instructionId + entry.kind) {<li><time>{{ plannerTime(entry.at) }}</time><span class="agenda-marker" aria-hidden="true"></span><div><h3>{{ entry.title }}</h3><p>{{ entry.kind }} · {{ memberCategoryLabel(entry.memberCategory) }}</p></div></li>}</ol>
+                <ol class="planner-agenda-list">@for (entry of calendarSelectedEntries(); track entry.instructionId + entry.kind) {<li class="planner-agenda-item clickable-agenda-item" (click)="openInstructionFromPlanner(entry.instructionId)"><time>{{ plannerTime(entry.at) }}</time><span class="agenda-marker" aria-hidden="true"></span><div><h3>{{ entry.title }}</h3><p>{{ entry.kind }} · {{ memberCategoryLabel(entry.memberCategory) }} · <span class="planner-item-rail">PayPal</span></p></div></li>}</ol>
               }
               @if (budgetsForDate(calendarSelectedDate()).length) {
                 <div class="budget-list" aria-label="Budgets created on this day">
                   @for (budget of budgetsForDate(calendarSelectedDate()); track budget.id) {
                     <article><div><strong>{{ budget.name }}</strong><small>Created {{ plannerTime(budget.createdAt) }} · {{ budget.active ? 'Active budget' : 'Inactive budget' }}@if (budgetDatesLabel(budget)) { · {{ budgetDatesLabel(budget) }}}</small></div><b>Max {{ formatAllocationAmount(budget) }}</b></article>
                   }
+                </div>
+              }
+              @if (!calendarSelectedEntries().length && !budgetsForDate(calendarSelectedDate()).length) {
+                <div class="planner-empty-agenda">
+                  <p>No instructions or budgets scheduled for {{ calendarDateLabel(calendarSelectedDate()) }}.</p>
+                  <button type="button" class="dash-secondary" (click)="startNewInstruction()">+ Add an instruction</button>
                 </div>
               }
             </div>

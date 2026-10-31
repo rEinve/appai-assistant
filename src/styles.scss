@@ -70,8 +70,35 @@ body { margin: 0; }
 .scouted-item { display:grid; gap:4px; padding:10px 14px; border-radius:10px; background:var(--surface); border:1px solid var(--outline-variant); }
 .scouted-top { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:13px; }
 .scouted-top strong { color:var(--on-surface); font-weight:650; }
-.scouted-badge { padding:3px 8px; border-radius:6px; background:var(--surface-container); color:var(--secondary); font-size:11px; font-weight:700; white-space:nowrap; }
+.scouted-badges { display:flex; align-items:center; gap:8px; }
+.scouted-rate { font-weight:700; color:var(--secondary); font-size:12.5px; }
+.paypal-pill { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; background:#003087; color:#ffffff; font-size:10.5px; font-weight:700; letter-spacing:.02em; white-space:nowrap; }
+.paypal-pill::before { content:""; display:inline-block; width:5px; height:5px; border-radius:50%; background:#0079C1; }
 .scouted-notes { margin:0; color:var(--on-surface-variant); font-size:12px; line-height:1.45; }
+.instruction-saved-ticket { display:grid; gap:14px; width:min(100%,760px); padding:20px 22px; border:1.5px solid var(--secondary); border-radius:16px; background:var(--surface-container-low); box-shadow:0 4px 16px rgba(0,0,0,.04); box-sizing:border-box; }
+.ticket-badge-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.ticket-badge { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--secondary); }
+.ticket-rail-pill { padding:2px 8px; border-radius:999px; background:#003087; color:#ffffff; font-size:10px; font-weight:700; }
+.ticket-title { margin:0; font-size:18px; font-weight:750; color:var(--on-surface); line-height:1.35; }
+.ticket-directive { margin:0; padding:10px 14px; border-radius:10px; background:var(--surface); border-left:3px solid var(--secondary); font-size:13px; color:var(--on-surface); line-height:1.5; }
+.ticket-meta-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; }
+.ticket-meta-item { display:grid; gap:3px; padding:10px 12px; border-radius:10px; background:var(--surface); border:1px solid var(--outline-variant); font-size:12px; }
+.ticket-meta-item small { color:var(--on-surface-variant); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+.ticket-meta-item strong { color:var(--on-surface); font-size:12.5px; }
+.ticket-prompt-preview { color:var(--on-surface-variant); font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ticket-scouted-recs { display:grid; gap:8px; }
+.scouted-label { font-size:10.5px; font-weight:700; color:var(--on-surface-variant); text-transform:uppercase; letter-spacing:.04em; }
+.ticket-recs-list { display:grid; gap:6px; }
+.ticket-rec-item { display:grid; gap:2px; padding:8px 12px; border-radius:8px; background:var(--surface); border:1px solid var(--outline-variant); }
+.rec-name-row { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12.5px; }
+.rec-rate { font-weight:700; color:var(--secondary); font-size:11.5px; }
+.rec-notes { margin:0; font-size:11.5px; color:var(--on-surface-variant); }
+.ticket-actions-row { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:4px; }
+.ticket-action-btn { min-height:38px; padding:0 16px; font-size:12.5px; font-weight:650; border-radius:10px; }
+.clickable-agenda-item { cursor:pointer; transition:transform .15s ease, background .15s ease; }
+.clickable-agenda-item:hover { background:var(--surface-container-low); transform:translateX(3px); }
+.planner-item-rail { display:inline-block; padding:1px 6px; border-radius:999px; background:#003087; color:#ffffff; font-size:9.5px; font-weight:700; vertical-align:middle; }
+.planner-empty-agenda { padding:32px 20px; text-align:center; color:var(--on-surface-variant); display:grid; gap:12px; place-items:center; }
 .assistant-questions-bubble { display:grid; gap:8px; width:min(100%,760px); padding:14px 18px; border:1px solid var(--outline-variant); border-radius:14px; background:var(--surface-container-low); }
 .assistant-questions-bubble strong { font-size:12.5px; color:var(--on-surface); }
 .assistant-questions-bubble ul { margin:0; padding-left:18px; font-size:12.5px; line-height:1.6; }

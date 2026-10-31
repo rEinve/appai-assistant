@@ -41,7 +41,16 @@ interface MemberInstruction {
   validUntil: string | null;
   timezoneSnapshot: string | null;
   nextRunAt: string | null;
-  structuredConstraints: { description?: string; categoryDetails?: Record<string, unknown> };
+  structuredConstraints: {
+    description?: string;
+    title?: string;
+    directive?: string;
+    paymentRail?: string;
+    intent?: string;
+    requirements?: string;
+    recommendations?: InstructionProposalRecommendation[];
+    categoryDetails?: Record<string, unknown>;
+  };
   createdAt: string;
 }
 
@@ -68,17 +77,22 @@ interface InstructionEditor {
 interface InstructionProposalRecommendation {
   name: string;
   rate: string;
+  paypalAccepted?: boolean;
   notes: string;
 }
 
 interface InstructionProposal {
   summary: string;
   conversationalReply?: string;
+  instructionTitle?: string;
+  directive?: string;
   intent?: string;
   category?: MemberWorkspaceCategory;
   requirements?: string;
   suggestedBudget?: string | null;
   recommendations?: InstructionProposalRecommendation[];
+  resolvedStartDate?: string | null;
+  resolvedEndDate?: string | null;
   maximumTotal: string | null;
   validFromLocal: string | null;
   validUntilLocal: string | null;
@@ -672,15 +686,26 @@ export class AppComponent implements OnInit {
     const start = new Date(Date.UTC(year, month - 1, 1 - first.getUTCDay(), 12));
     const entries = new Map<string, CalendarEntry[]>();
     for (const instruction of this.instructions()) {
+      let hasDate = false;
       const addAt = (value: string | null, kind: string) => {
         if (!value) return;
-        const item: CalendarEntry = { instructionId: instruction.id, title: instruction.promptText || instruction.structuredConstraints.description || 'Saved instruction', kind, memberCategory: instruction.memberCategory, at: value };
+        hasDate = true;
+        const item: CalendarEntry = {
+          instructionId: instruction.id,
+          title: instruction.structuredConstraints?.title || instruction.promptText || instruction.structuredConstraints?.description || 'Saved instruction',
+          kind,
+          memberCategory: instruction.memberCategory,
+          at: value,
+        };
         const dateKey = this.calendarDateKey(new Date(value));
         entries.set(dateKey, [...(entries.get(dateKey) ?? []), item]);
       };
       addAt(instruction.validFrom, 'Window starts');
       addAt(instruction.validUntil, 'Deadline');
       addAt(instruction.nextRunAt, 'Scheduled');
+      if (!hasDate && instruction.createdAt) {
+        addAt(instruction.createdAt, 'Saved draft');
+      }
     }
     const today = this.calendarDateKey(new Date());
     return Array.from({ length: 42 }, (_, index) => {
@@ -830,12 +855,33 @@ export class AppComponent implements OnInit {
       .slice(0, 5);
   }
 
-  private calendarDateKey(date: Date): string {
+  calendarDateKey(date: Date | string): string {
+    const d = typeof date === 'string' ? new Date(date) : date;
     const timezone = this.accountSettings()?.timezone ?? 'UTC';
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en', {
       timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(date).map((part) => [part.type, part.value]));
+    }).formatToParts(d).map((part) => [part.type, part.value]));
     return `${parts['year']}-${parts['month']}-${parts['day']}`;
+  }
+
+  viewInstructionInPlanner(instruction: MemberInstruction): void {
+    const targetDate = instruction.validFrom
+      ? new Date(instruction.validFrom)
+      : (instruction.createdAt ? new Date(instruction.createdAt) : new Date());
+    const dateKey = this.calendarDateKey(targetDate);
+    const monthKey = dateKey.slice(0, 7);
+    this.calendarMonth.set(monthKey);
+    this.calendarSelectedDate.set(dateKey);
+    this.plannerMode.set('day');
+    this.dashboardView.set('Planner');
+  }
+
+  openInstructionFromPlanner(instructionId: string): void {
+    const found = this.instructions().find((i) => i.id === instructionId);
+    if (found) {
+      this.selectInstruction(found);
+      this.dashboardView.set('Instructions');
+    }
   }
 
   async openAccount(): Promise<void> {
@@ -1189,15 +1235,22 @@ export class AppComponent implements OnInit {
         return;
       }
       if (!this.draftIdempotencyKey) this.draftIdempotencyKey = globalThis.crypto.randomUUID();
+      const proposal = this.instructionProposal();
       const result = await firstValueFrom(this.http.post<{ instruction: MemberInstruction }>(
         `${this.apiBaseUrl}/api/v1/instructions`,
         {
           description: this.instructionDescription,
           memberCategory: this.instructionMemberCategory,
           budgetId: this.instructionBudgetId || null,
-          maximumTotal: this.instructionMaximumTotal.trim(),
-          validFromLocal: this.instructionValidFromLocal,
-          validUntilLocal: this.instructionValidUntilLocal,
+          maximumTotal: this.instructionMaximumTotal.trim() || (proposal?.suggestedBudget ?? ''),
+          validFromLocal: this.instructionValidFromLocal || (proposal?.resolvedStartDate ?? ''),
+          validUntilLocal: this.instructionValidUntilLocal || (proposal?.resolvedEndDate ?? ''),
+          title: proposal?.instructionTitle || null,
+          directive: proposal?.directive || null,
+          paymentRail: 'PAYPAL',
+          intent: proposal?.intent || null,
+          requirements: proposal?.requirements || null,
+          recommendations: proposal?.recommendations || [],
         },
         { withCredentials: true, headers: { 'Idempotency-Key': this.draftIdempotencyKey } },
       ));
@@ -1205,14 +1258,10 @@ export class AppComponent implements OnInit {
       this.memberProfile.update((profile) => profile
         ? { ...profile, workspace: { ...profile.workspace, instructionCount: profile.workspace.instructionCount + 1 } }
         : profile);
-      this.instructionDescription = '';
-      this.instructionComposerInput = '';
-      this.instructionBudgetId = '';
-      this.clearAssistantProposal();
+      this.selectedInstruction.set(result.instruction);
+      this.instructionDescription = result.instruction.promptText ?? this.instructionDescription;
       this.draftIdempotencyKey = '';
-      this.selectedInstruction.set(null);
-      this.instructionChatStep.set('prompt');
-      this.instructionNotice.set('Instruction saved as a draft. Select it from Recent to keep editing.');
+      this.instructionNotice.set(`Instruction saved: ${result.instruction.structuredConstraints?.title || 'Draft instruction'}.`);
       this.dashboardView.set('Instructions');
       await this.loadInstructions();
     } catch (error) {
