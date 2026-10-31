@@ -1,5 +1,5 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, inject, OnInit, signal, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom, TimeoutError, timeout } from 'rxjs';
 
@@ -198,6 +198,8 @@ export class AppComponent implements OnInit {
   private readonly http = inject(HttpClient);
   private readonly apiBaseUrl = typeof window !== 'undefined' && (window.location.protocol === 'https:' || window.location.hostname === 'appai.local') ? '' : 'http://localhost:4300';
 
+  @ViewChild('chatThread') private chatThreadRef?: ElementRef<HTMLElement>;
+
   readonly dashboardOpen = signal(true);
   readonly navigationCollapsed = signal(false);
   readonly homePanel = signal<'how' | 'control' | 'needs'>('how');
@@ -256,6 +258,7 @@ export class AppComponent implements OnInit {
   password = '';
   inviteCode = '';
   instructionDescription = '';
+  instructionComposerInput = '';
   instructionMemberCategory: MemberWorkspaceCategory = 'PERSONAL';
   instructionBudgetId = '';
   instructionMaximumTotal = '';
@@ -320,6 +323,7 @@ export class AppComponent implements OnInit {
     await this.openInstructions();
     this.selectedInstruction.set(null);
     this.instructionDescription = '';
+    this.instructionComposerInput = '';
     this.instructionProposal.set(null);
     this.instructionAssistantTurns.set([]);
     this.instructionAssistantReply = '';
@@ -341,6 +345,81 @@ export class AppComponent implements OnInit {
 
   submitInstructionPrompt(): void {
     this.advanceInstructionChat(this.instructionAreaPreselected() ? 'budget' : 'category');
+  }
+
+  get composerPlaceholder(): string {
+    if (this.instructionProposal()?.questions && this.instructionProposal()!.questions.length > 0) {
+      return 'Answer the assistant’s questions or add details… (Press Enter to send)';
+    }
+    if (!this.instructionDescription) {
+      return this.selectedInstruction()
+        ? 'Type details to refine this instruction… (Press Enter to send)'
+        : 'For example: Find me a quiet place to stay in Arusha next month. (Press Enter to send)';
+    }
+    return 'Add details or instructions… (Press Enter to send)';
+  }
+
+  onComposerKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      if (event.isComposing || event.keyCode === 229) {
+        return;
+      }
+      this.sendInstructionMessage();
+    }
+  }
+
+  sendInstructionMessage(): void {
+    const text = this.instructionComposerInput.trim();
+    if (!text || this.instructionAssistantBusy()) return;
+
+    this.instructionComposerInput = '';
+
+    if (this.instructionProposal()?.questions && this.instructionProposal()!.questions.length > 0) {
+      this.instructionAssistantReply = text;
+      void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
+      return;
+    }
+
+    if (!this.instructionDescription || this.instructionChatStep() === 'prompt') {
+      this.instructionDescription = text;
+      this.submitInstructionPrompt();
+      this.scrollChatToBottom();
+      return;
+    }
+
+    this.instructionAssistantReply = text;
+    void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
+  }
+
+  askAssistantFromComposer(): void {
+    const text = this.instructionComposerInput.trim();
+    if (text) {
+      if (!this.instructionDescription) {
+        this.instructionDescription = text;
+      } else {
+        this.instructionAssistantReply = text;
+      }
+      this.instructionComposerInput = '';
+    }
+    void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
+  }
+
+  editCurrentWording(): void {
+    this.instructionComposerInput = this.instructionDescription;
+    this.advanceInstructionChat('prompt');
+    setTimeout(() => {
+      const el = document.getElementById('instruction-composer-input');
+      if (el) el.focus();
+    }, 50);
+  }
+
+  scrollChatToBottom(): void {
+    setTimeout(() => {
+      if (this.chatThreadRef?.nativeElement) {
+        this.chatThreadRef.nativeElement.scrollTop = this.chatThreadRef.nativeElement.scrollHeight;
+      }
+    }, 60);
   }
 
   clearWebSearch(): void {
@@ -474,6 +553,7 @@ export class AppComponent implements OnInit {
     this.selectedInstruction.set(instruction);
     this.instructionAreaPreselected.set(false);
     this.instructionDescription = instruction.promptText ?? instruction.structuredConstraints.description ?? '';
+    this.instructionComposerInput = '';
     this.instructionProposal.set(null);
     this.instructionAssistantTurns.set([]);
     this.instructionAssistantReply = '';
@@ -496,6 +576,7 @@ export class AppComponent implements OnInit {
       this.selectedInstruction.set(null);
       this.instructionDeleteConfirmId.set(null);
       this.instructionDescription = '';
+      this.instructionComposerInput = '';
       this.instructionChatStep.set('prompt');
       this.instructionNotice.set(instruction.state === 'DRAFT'
         ? 'Draft removed from your list. Its audit record is retained.'
@@ -1104,6 +1185,7 @@ export class AppComponent implements OnInit {
         ? { ...profile, workspace: { ...profile.workspace, instructionCount: profile.workspace.instructionCount + 1 } }
         : profile);
       this.instructionDescription = '';
+      this.instructionComposerInput = '';
       this.instructionBudgetId = '';
       this.clearAssistantProposal();
       this.draftIdempotencyKey = '';

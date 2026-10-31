@@ -69,48 +69,187 @@
               @if (selectedInstruction(); as selected) {<div class="instruction-chat-header-actions"><span class="instruction-state-pill">{{ selected.state.replace('_', ' ') }}</span>@if (selected.state === 'DRAFT') {<button class="dash-secondary instruction-discard-button" type="button" (click)="requestDiscardInstruction(selected)">Delete draft</button>}</div>}
             </header>
             <div class="instruction-chat-body">
-              <div class="instruction-chat-thread" aria-live="polite">
+              <div #chatThread class="instruction-chat-thread" aria-live="polite">
                 @if (selectedInstruction(); as selected) {
                   <p class="chat-message assistant">You’re looking at this saved instruction. You can continue refining the wording, area, and budget here.</p>
-                  <p class="chat-message member">{{ selected.promptText || selected.structuredConstraints.description }}</p>
-                  @if (selected.state !== 'DRAFT') {<p class="chat-message assistant">This instruction is {{ selected.state.toLowerCase() }} and can’t be edited here. You can review its details below or revoke it to stop future activity.</p>
-                    @if (selected.state === 'ACTIVE' || selected.state === 'PAUSED') {<div class="instruction-form-actions"><button class="dash-secondary" type="button" (click)="changeInstructionLifecycle(selected, selected.state === 'ACTIVE' ? 'pause' : 'resume')" [disabled]="fixtureActivationId()">{{ selected.state === 'ACTIVE' ? 'Pause fixture' : 'Resume fixture' }}</button><button class="dash-secondary" type="button" (click)="requestDiscardInstruction(selected)">Revoke instruction</button></div>}
-                    @if (instructionDeleteConfirmId() === selected.id) {<div class="instruction-delete-confirm" role="group" aria-label="Confirm instruction removal"><p>Revoke this instruction and stop future activity? The audit record will be retained.</p><button class="dash-secondary" type="button" (click)="instructionDeleteConfirmId.set(null)">Keep it</button><button class="dash-primary" type="button" (click)="discardInstruction(selected)" [disabled]="fixtureActivationId()">Revoke instruction</button></div>}
+                  <div class="chat-message member">
+                    <span>{{ selected.promptText || selected.structuredConstraints.description }}</span>
+                    @if (selected.state === 'DRAFT') {
+                      <button type="button" class="dash-text-button edit-prompt-btn" (click)="editCurrentWording()">Edit wording</button>
+                    }
+                  </div>
+                  @if (selected.state !== 'DRAFT') {
+                    <p class="chat-message assistant">This instruction is {{ selected.state.toLowerCase() }} and can’t be edited here. You can review its details below or revoke it to stop future activity.</p>
+                    @if (selected.state === 'ACTIVE' || selected.state === 'PAUSED') {
+                      <div class="instruction-form-actions">
+                        <button class="dash-secondary" type="button" (click)="changeInstructionLifecycle(selected, selected.state === 'ACTIVE' ? 'pause' : 'resume')" [disabled]="fixtureActivationId()">{{ selected.state === 'ACTIVE' ? 'Pause fixture' : 'Resume fixture' }}</button>
+                        <button class="dash-secondary" type="button" (click)="requestDiscardInstruction(selected)">Revoke instruction</button>
+                      </div>
+                    }
+                    @if (instructionDeleteConfirmId() === selected.id) {
+                      <div class="instruction-delete-confirm" role="group" aria-label="Confirm instruction removal">
+                        <p>Revoke this instruction and stop future activity? The audit record will be retained.</p>
+                        <button class="dash-secondary" type="button" (click)="instructionDeleteConfirmId.set(null)">Keep it</button>
+                        <button class="dash-primary" type="button" (click)="discardInstruction(selected)" [disabled]="fixtureActivationId()">Revoke instruction</button>
+                      </div>
+                    }
                   } @else {
-                    @if (instructionDeleteConfirmId() === selected.id) {<div class="instruction-delete-confirm" role="group" aria-label="Confirm draft removal"><p>Remove this draft from your list? Its audit record will be retained.</p><button class="dash-secondary" type="button" (click)="instructionDeleteConfirmId.set(null)">Keep draft</button><button class="dash-primary" type="button" (click)="discardInstruction(selected)" [disabled]="fixtureActivationId()">Delete draft</button></div>}
-                    @if (selected.executionEnvironment === 'FIXTURE') {@if (readinessReports()[selected.id]; as report) {<section class="readiness-report" aria-live="polite"><strong>{{ report.canActivateFixture ? 'Ready for a local fixture run' : 'Fixture run is blocked' }}</strong><p class="fixture-label">{{ report.fixtureLabel }}</p>@if (report.fixtureBlockers.length > 0) {<ul>@for (blocker of report.fixtureBlockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul>} @else {<button class="dash-secondary readiness-button" type="button" (click)="activateFixture(selected)" [disabled]="fixtureActivationId() === selected.id">{{ fixtureActivationId() === selected.id ? 'Starting fixture…' : 'Start fixture-only run' }}</button>}<details><summary>Why real purchasing is unavailable</summary><ul>@for (blocker of report.blockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul></details></section>} @else {<button class="dash-secondary" type="button" (click)="checkActivationReadiness(selected.id)" [disabled]="readinessLoadingId() === selected.id">{{ readinessLoadingId() === selected.id ? 'Checking fixture readiness…' : 'Check fixture readiness' }}</button>}}
-                    @if (instructionChatStep() !== 'prompt') {<p class="chat-message member">{{ instructionDescription }}</p>@if (!instructionAreaPreselected()) {<p class="chat-message assistant">Which area should this belong to?</p>}}
-                    @if (!instructionAreaPreselected() && (instructionChatStep() === 'category' || instructionChatStep() === 'budget' || instructionChatStep() === 'review')) {<div class="chat-choice-grid">@for (category of memberCategories; track category.id) {<button type="button" class="chat-choice" [class.chosen]="instructionMemberCategory === category.id" (click)="instructionMemberCategory = category.id; advanceInstructionChat('budget')">{{ category.label }}</button>}</div>}
-                    @if (instructionChatStep() === 'budget' || instructionChatStep() === 'review') {
-                      <p class="chat-message member">{{ memberCategoryLabel(instructionMemberCategory) }}</p><p class="chat-message assistant">Which budget should cover this? I’ll carry its maximum and date limits into the instruction.</p>
-                      <div class="chat-budget-choices">@for (budget of budgets(); track budget.id) {@if (budget.active) {<button type="button" class="chat-budget-choice" [class.chosen]="instructionBudgetId === budget.id" (click)="chooseInstructionBudget(budget.id)"><strong>{{ budget.name }}</strong><span>Maximum {{ formatAllocationAmount(budget) }}</span>@if (budgetDatesLabel(budget)) {<small>{{ budgetDatesLabel(budget) }}</small>}</button>}}</div>
-                      <button type="button" class="dash-text-button" (click)="chooseInstructionBudget('')">Continue without a budget</button>
+                    @if (instructionDeleteConfirmId() === selected.id) {
+                      <div class="instruction-delete-confirm" role="group" aria-label="Confirm draft removal">
+                        <p>Remove this draft from your list? Its audit record will be retained.</p>
+                        <button class="dash-secondary" type="button" (click)="instructionDeleteConfirmId.set(null)">Keep draft</button>
+                        <button class="dash-primary" type="button" (click)="discardInstruction(selected)" [disabled]="fixtureActivationId()">Delete draft</button>
+                      </div>
                     }
-                    @if (instructionChatStep() === 'review') {
-                      <p class="chat-message member">{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'I’ll choose a budget later' }}</p><p class="chat-message assistant">{{ selectedInstruction() ? 'Review your changes before saving. This updates the draft only; it does not schedule or make a purchase.' : 'I have enough to save this draft. You can review it before activation. It won’t schedule or make a purchase.' }}</p>
-                      <div class="chat-review-summary"><span>{{ memberCategoryLabel(instructionMemberCategory) }}</span><strong>{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'No budget selected' }}</strong>@if (selectedInstructionBudget(); as selectedBudget) {<small>Maximum {{ formatAllocationAmount(selectedBudget) }} · {{ budgetDatesLabel(selectedBudget) || 'No date limits' }}</small>} @else {<small>A budget is required before activation.</small>}</div>
-                      <div class="instruction-form-actions"><button class="dash-secondary" type="button" (click)="advanceInstructionChat('budget')">Back</button><button class="dash-primary" type="button" (click)="saveInstructionDraft()" [disabled]="instructionSaving()">{{ instructionSaving() ? 'Saving…' : selectedInstruction() ? 'Save changes' : 'Save instruction' }}</button></div>
+                    @if (selected.executionEnvironment === 'FIXTURE') {
+                      @if (readinessReports()[selected.id]; as report) {
+                        <section class="readiness-report" aria-live="polite">
+                          <strong>{{ report.canActivateFixture ? 'Ready for a local fixture run' : 'Fixture run is blocked' }}</strong>
+                          <p class="fixture-label">{{ report.fixtureLabel }}</p>
+                          @if (report.fixtureBlockers.length > 0) {
+                            <ul>@for (blocker of report.fixtureBlockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul>
+                          } @else {
+                            <button class="dash-secondary readiness-button" type="button" (click)="activateFixture(selected)" [disabled]="fixtureActivationId() === selected.id">{{ fixtureActivationId() === selected.id ? 'Starting fixture…' : 'Start fixture-only run' }}</button>
+                          }
+                          <details><summary>Why real purchasing is unavailable</summary><ul>@for (blocker of report.blockers; track blocker.code) {<li><b>{{ blocker.title }}.</b> {{ blocker.detail }}</li>}</ul></details>
+                        </section>
+                      } @else {
+                        <button class="dash-secondary" type="button" (click)="checkActivationReadiness(selected.id)" [disabled]="readinessLoadingId() === selected.id">{{ readinessLoadingId() === selected.id ? 'Checking fixture readiness…' : 'Check fixture readiness' }}</button>
+                      }
                     }
-                    @if (instructionChatStep() !== 'prompt' && instructionProposal(); as proposal) {<section class="assistant-proposal compact"><strong>Assistant draft details</strong><span>{{ proposal.summary }}</span><span>Maximum: {{ instructionMaximumTotal || 'Not specified' }} · Start: {{ instructionValidFromLocal || 'Not specified' }} · Deadline: {{ instructionValidUntilLocal || 'Not specified' }}</span><button class="dash-text-button" type="button" (click)="advanceInstructionChat('prompt')">Review suggestions</button></section>}
                   }
                 } @else {
                   <p class="chat-message assistant">Hi {{ profile.member.name.split(' ')[0] }}, what would you like handled? Write it naturally. I’ll keep your wording as the instruction.</p>
-                  @if (instructionChatStep() !== 'prompt') {<p class="chat-message member">{{ instructionDescription }}</p>@if (!instructionAreaPreselected()) {<p class="chat-message assistant">Which area should this belong to?</p>}}
-                  @if (!instructionAreaPreselected() && (instructionChatStep() === 'category' || instructionChatStep() === 'budget' || instructionChatStep() === 'review')) {<div class="chat-choice-grid">@for (category of memberCategories; track category.id) {<button type="button" class="chat-choice" [class.chosen]="instructionMemberCategory === category.id" (click)="instructionMemberCategory = category.id; advanceInstructionChat('budget')">{{ category.label }}</button>}</div>}
-                  @if (instructionChatStep() === 'budget' || instructionChatStep() === 'review') {
-                    <p class="chat-message member">{{ memberCategoryLabel(instructionMemberCategory) }}</p><p class="chat-message assistant">Which budget should cover this? I’ll carry its maximum and date limits into the instruction.</p>
-                    <div class="chat-budget-choices">@for (budget of budgets(); track budget.id) {@if (budget.active) {<button type="button" class="chat-budget-choice" [class.chosen]="instructionBudgetId === budget.id" (click)="chooseInstructionBudget(budget.id)"><strong>{{ budget.name }}</strong><span>Maximum {{ formatAllocationAmount(budget) }}</span>@if (budgetDatesLabel(budget)) {<small>{{ budgetDatesLabel(budget) }}</small>}</button>}}</div>
-                    <button type="button" class="dash-text-button" (click)="chooseInstructionBudget('')">Continue without a budget</button>
+                  @if (instructionDescription) {
+                    <div class="chat-message member">
+                      <span>{{ instructionDescription }}</span>
+                      <button type="button" class="dash-text-button edit-prompt-btn" (click)="editCurrentWording()">Edit wording</button>
+                    </div>
                   }
-                  @if (instructionChatStep() === 'review') {<p class="chat-message member">{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'I’ll choose a budget later' }}</p><p class="chat-message assistant">I have enough to save this draft. You can review it before activation. It won’t schedule or make a purchase.</p><div class="chat-review-summary"><span>{{ memberCategoryLabel(instructionMemberCategory) }}</span><strong>{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'No budget selected' }}</strong>@if (selectedInstructionBudget(); as selectedBudget) {<small>Maximum {{ formatAllocationAmount(selectedBudget) }} · {{ budgetDatesLabel(selectedBudget) || 'No date limits' }}</small>} @else {<small>A budget is required before activation.</small>}</div><div class="instruction-form-actions"><button class="dash-secondary" type="button" (click)="advanceInstructionChat('budget')">Back</button><button class="dash-primary" type="button" (click)="saveInstructionDraft()" [disabled]="instructionSaving()">{{ instructionSaving() ? 'Saving…' : 'Save instruction' }}</button></div>}
-                  @if (instructionChatStep() !== 'prompt' && instructionProposal(); as proposal) {<section class="assistant-proposal compact"><strong>Assistant draft details</strong><span>{{ proposal.summary }}</span><span>Maximum: {{ instructionMaximumTotal || 'Not specified' }} · Start: {{ instructionValidFromLocal || 'Not specified' }} · Deadline: {{ instructionValidUntilLocal || 'Not specified' }}</span><button class="dash-text-button" type="button" (click)="advanceInstructionChat('prompt')">Review suggestions</button></section>}
+                }
+
+                @if (instructionProposal(); as proposal) {
+                  <section class="assistant-proposal" aria-labelledby="assistant-proposal-title">
+                    <div class="assistant-proposal-header">
+                      <span class="assistant-badge">Assistant suggestions</span>
+                      <button type="button" class="dash-text-button" (click)="clearAssistantProposal()">Clear</button>
+                    </div>
+                    <p>{{ proposal.summary }}</p>
+                    <div class="assistant-proposal-fields">
+                      <label>Maximum ({{ accountSettings()?.currency || 'account currency' }})
+                        <input type="text" inputmode="decimal" [ngModel]="instructionMaximumTotal" (ngModelChange)="updateAssistantProposalField('maximumTotal', $event)" name="assistantMaximum" placeholder="No amount found" />
+                      </label>
+                      <label>Starts at ({{ accountSettings()?.timezone || 'account timezone' }})
+                        <input type="datetime-local" [ngModel]="instructionValidFromLocal" (ngModelChange)="updateAssistantProposalField('validFromLocal', $event)" name="assistantStart" />
+                      </label>
+                      <label>Deadline ({{ accountSettings()?.timezone || 'account timezone' }})
+                        <input type="datetime-local" [ngModel]="instructionValidUntilLocal" (ngModelChange)="updateAssistantProposalField('validUntilLocal', $event)" name="assistantDeadline" />
+                      </label>
+                    </div>
+                    @if (proposal.questions.length) {
+                      <div class="proposal-questions">
+                        <strong>Needs your input</strong>
+                        <ul>@for (question of proposal.questions; track $index) {<li>{{ question }}</li>}</ul>
+                      </div>
+                    }
+                  </section>
+                }
+
+                @if (instructionAssistantTurns().length) {
+                  @for (turn of instructionAssistantTurns(); track $index) {
+                    <p class="chat-message member">{{ turn.reply }}</p>
+                  }
+                }
+
+                @if (instructionAssistantBusy()) {
+                  <p class="chat-message assistant typing-indicator">Thinking…</p>
+                }
+
+                @if ((instructionDescription || selectedInstruction()) && (!selectedInstruction() || selectedInstruction()?.state === 'DRAFT')) {
+                  @if (!instructionAreaPreselected() && (instructionChatStep() === 'category' || instructionChatStep() === 'budget' || instructionChatStep() === 'review')) {
+                    <p class="chat-message assistant">Which area should this belong to?</p>
+                    <div class="chat-choice-grid">
+                      @for (category of memberCategories; track category.id) {
+                        <button type="button" class="chat-choice" [class.chosen]="instructionMemberCategory === category.id" (click)="instructionMemberCategory = category.id; advanceInstructionChat('budget')">{{ category.label }}</button>
+                      }
+                    </div>
+                  }
+                  @if (instructionChatStep() === 'budget' || instructionChatStep() === 'review') {
+                    <p class="chat-message member">{{ memberCategoryLabel(instructionMemberCategory) }}</p>
+                    <p class="chat-message assistant">Which budget should cover this? I’ll carry its maximum and date limits into the instruction.</p>
+                    <div class="chat-budget-choices">
+                      @for (budget of budgets(); track budget.id) {
+                        @if (budget.active) {
+                          <button type="button" class="chat-budget-choice" [class.chosen]="instructionBudgetId === budget.id" (click)="chooseInstructionBudget(budget.id)">
+                            <strong>{{ budget.name }}</strong>
+                            <span>Maximum {{ formatAllocationAmount(budget) }}</span>
+                            @if (budgetDatesLabel(budget)) {<small>{{ budgetDatesLabel(budget) }}</small>}
+                          </button>
+                        }
+                      }
+                    </div>
+                    <button type="button" class="dash-text-button" (click)="chooseInstructionBudget('')">Continue without a budget</button>
+                    @if (budgets().length === 0) {
+                      <p class="instruction-field-help">You can create a budget in Account and attach it later. A budget is required before activation.</p>
+                    }
+                  }
+                  @if (instructionChatStep() === 'review') {
+                    <p class="chat-message member">{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'I’ll choose a budget later' }}</p>
+                    <p class="chat-message assistant">{{ selectedInstruction() ? 'Review your changes before saving. This updates the draft only; it does not schedule or make a purchase.' : 'I have enough to save this draft. You can review it before activation. It won’t schedule or make a purchase.' }}</p>
+                    <div class="chat-review-summary">
+                      <span>{{ memberCategoryLabel(instructionMemberCategory) }}</span>
+                      <strong>{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'No budget selected' }}</strong>
+                      @if (selectedInstructionBudget(); as selectedBudget) {
+                        <small>Maximum {{ formatAllocationAmount(selectedBudget) }} · {{ budgetDatesLabel(selectedBudget) || 'No date limits' }}</small>
+                      } @else {
+                        <small>A budget is required before activation.</small>
+                      }
+                    </div>
+                    <div class="instruction-form-actions">
+                      <button class="dash-secondary" type="button" (click)="advanceInstructionChat('budget')">Back</button>
+                      <button class="dash-primary" type="button" (click)="saveInstructionDraft()" [disabled]="instructionSaving()">{{ instructionSaving() ? 'Saving…' : selectedInstruction() ? 'Save changes' : 'Save instruction' }}</button>
+                    </div>
+                  }
                 }
               </div>
-              @if (!selectedInstruction() || selectedInstruction()?.state === 'DRAFT') { @if (instructionChatStep() === 'prompt') {<form class="instruction-chat-composer" (ngSubmit)="submitInstructionPrompt()"><label class="visually-hidden" for="instruction-description">{{ selectedInstruction() ? 'Edit your instruction' : 'Your instruction' }}</label><div class="instruction-composer-card"><textarea id="instruction-description" name="instructionDescription" [(ngModel)]="instructionDescription" (ngModelChange)="draftIdempotencyKey = ''; clearAssistantProposal()" required minlength="3" maxlength="500" rows="2" [placeholder]="selectedInstruction() ? 'Edit this instruction in your own words.' : 'For example: Find me a quiet place to stay in Arusha next month.'"></textarea><div class="instruction-composer-footer"><div class="instruction-composer-footer-note"><span class="instruction-composer-plus" aria-hidden="true">+</span><p class="chat-unavailable-note">Suggestions are reviewed before they become draft details.</p></div><div class="instruction-composer-actions"><button class="dash-secondary" type="button" (click)="refineInstructionWithAssistant()" [disabled]="instructionDescription.trim().length < 3 || instructionAssistantBusy()">{{ instructionAssistantBusy() ? 'Thinking…' : 'Ask assistant' }}</button><button class="dash-primary" type="submit" [disabled]="instructionDescription.trim().length < 3">{{ selectedInstruction() ? 'Continue editing' : 'Continue manually' }}</button></div></div></div></form>
-                @if (instructionProposal(); as proposal) {<section class="assistant-proposal" aria-labelledby="assistant-proposal-title"><h3 id="assistant-proposal-title">Assistant suggestions</h3><p>{{ proposal.summary }}</p><div class="assistant-proposal-fields"><label>Maximum ({{ accountSettings()?.currency || 'account currency' }})<input type="text" inputmode="decimal" [ngModel]="instructionMaximumTotal" (ngModelChange)="updateAssistantProposalField('maximumTotal', $event)" name="assistantMaximum" placeholder="No amount found" /></label><label>Starts at ({{ accountSettings()?.timezone || 'account timezone' }})<input type="datetime-local" [ngModel]="instructionValidFromLocal" (ngModelChange)="updateAssistantProposalField('validFromLocal', $event)" name="assistantStart" /></label><label>Deadline ({{ accountSettings()?.timezone || 'account timezone' }})<input type="datetime-local" [ngModel]="instructionValidUntilLocal" (ngModelChange)="updateAssistantProposalField('validUntilLocal', $event)" name="assistantDeadline" /></label></div>@if (proposal.questions.length) {<div><strong>Needs your input</strong><ul>@for (question of proposal.questions; track $index) {<li>{{ question }}</li>}</ul></div>}@if (instructionAssistantTurns().length) {<div class="assistant-chat-history" aria-label="Clarification replies">@for (turn of instructionAssistantTurns(); track $index) {<p><strong>You:</strong> {{ turn.reply }}</p>}</div>}<label class="assistant-reply-label" for="assistant-reply">Add a detail or answer a question<textarea id="assistant-reply" name="assistantReply" [(ngModel)]="instructionAssistantReply" rows="2" maxlength="500" placeholder="For example: I need it before 15 November."></textarea></label><button class="dash-secondary" type="button" (click)="refineInstructionWithAssistant()" [disabled]="instructionAssistantBusy() || instructionAssistantReply.trim().length < 1">{{ instructionAssistantBusy() ? 'Thinking…' : 'Reply and refine' }}</button><p class="assistant-proposal-note">Check each value. Saving creates a draft only; it does not schedule or purchase anything.</p></section>}
-              }}
-              @if (instructionChatStep() === 'budget' && budgets().length === 0) {<p class="instruction-field-help">You can create a budget in Account and attach it later. A budget is required before activation.</p>}
-              @if (instructionChatStep() !== 'prompt') {<p class="chat-unavailable-note">Web search results are leads only. Supplier verification and automated discovery are still being developed.</p>}
+
+              @if (!selectedInstruction() || selectedInstruction()?.state === 'DRAFT') {
+                <form class="instruction-chat-composer" (ngSubmit)="sendInstructionMessage()">
+                  <label class="visually-hidden" for="instruction-composer-input">Your message or instruction</label>
+                  <div class="instruction-composer-card">
+                    <textarea
+                      id="instruction-composer-input"
+                      name="instructionComposerInput"
+                      [(ngModel)]="instructionComposerInput"
+                      (keydown)="onComposerKeydown($event)"
+                      [placeholder]="composerPlaceholder"
+                      rows="2"
+                      maxlength="500"></textarea>
+                    <div class="instruction-composer-footer">
+                      <div class="instruction-composer-footer-note">
+                        <span class="instruction-composer-plus" aria-hidden="true">+</span>
+                        <p class="chat-unavailable-note">Suggestions are reviewed before they become draft details.</p>
+                      </div>
+                      <div class="instruction-composer-actions">
+                        <button
+                          class="dash-secondary"
+                          type="button"
+                          (click)="askAssistantFromComposer()"
+                          [disabled]="(!instructionComposerInput.trim() && !instructionDescription.trim()) || instructionAssistantBusy()">
+                          {{ instructionAssistantBusy() ? 'Thinking…' : 'Ask assistant' }}
+                        </button>
+                        <button
+                          class="chat-send-btn"
+                          type="submit"
+                          [attr.aria-label]="'Send message'"
+                          [disabled]="!instructionComposerInput.trim() || instructionAssistantBusy()">
+                          <span aria-hidden="true">↑</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </form>
+              }
             </div>
           </section>
         </section>
