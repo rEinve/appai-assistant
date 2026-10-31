@@ -187,39 +187,7 @@
                     <p>{{ proposal.conversationalReply || proposal.summary }}</p>
                   </div>
 
-                  <!-- 2. Extracted Structured Entity Card (Matching user screenshot) -->
-                  <div class="assistant-entity-card">
-                    <div class="entity-card-header">
-                      <span class="entity-card-badge">✦ Extracted Need & Intent</span>
-                      <span class="entity-category-chip">{{ memberCategoryLabel(instructionMemberCategory) }}</span>
-                    </div>
-                    <div class="entity-card-grid">
-                      @if (proposal.intent) {
-                        <div class="entity-card-item">
-                          <small>Intent</small>
-                          <strong>{{ proposal.intent.replace('_', ' ') }}</strong>
-                        </div>
-                      }
-                      <div class="entity-card-item">
-                        <small>Budget / Pricing</small>
-                        <strong>{{ instructionMaximumTotal ? (instructionMaximumTotal + ' ' + (accountSettings()?.currency || 'USD')) : (proposal.suggestedBudget || 'Market rate discovery') }}</strong>
-                      </div>
-                      @if (proposal.requirements) {
-                        <div class="entity-card-item entity-card-full">
-                          <small>Requirements</small>
-                          <span>{{ proposal.requirements }}</span>
-                        </div>
-                      }
-                      @if (instructionValidFromLocal || instructionValidUntilLocal) {
-                        <div class="entity-card-item entity-card-full">
-                          <small>Timeline</small>
-                          <span>{{ instructionValidFromLocal || 'Anytime' }}{{ instructionValidUntilLocal ? ' → ' + instructionValidUntilLocal : '' }}</span>
-                        </div>
-                      }
-                    </div>
-                  </div>
-
-                  <!-- 3. Scouted Options & Candidate Leads -->
+                  <!-- 2. Scouted Options & Candidate Leads -->
                   @if (proposal.recommendations && proposal.recommendations.length > 0) {
                     <div class="assistant-scouted-card">
                       <div class="scouted-header">
@@ -245,7 +213,7 @@
                     </div>
                   }
 
-                  <!-- 4. One-Tap Confirmation / Save Card -->
+                  <!-- 3. One-Tap Confirmation / Save Card -->
                   <div class="instruction-confirm-card">
                     <div class="confirm-info">
                       <strong>Ready to save this instruction?</strong>
