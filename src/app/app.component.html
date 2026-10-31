@@ -166,55 +166,55 @@
                 }
 
                 @if ((instructionDescription || selectedInstruction()) && (!selectedInstruction() || selectedInstruction()?.state === 'DRAFT')) {
-                  @if (!instructionAreaPreselected() && (instructionChatStep() === 'category' || instructionChatStep() === 'budget' || instructionChatStep() === 'review')) {
-                    <p class="chat-message assistant">Which area should this belong to?</p>
-                    <div class="chat-choice-grid">
-                      @for (category of memberCategories; track category.id) {
-                        <button type="button" class="chat-choice" [class.chosen]="instructionMemberCategory === category.id" (click)="instructionMemberCategory = category.id; advanceInstructionChat('budget')">{{ category.label }}</button>
-                      }
-                    </div>
-                  }
-                  @if (instructionChatStep() === 'budget' || instructionChatStep() === 'review') {
-                    <p class="chat-message member">{{ memberCategoryLabel(instructionMemberCategory) }}</p>
-                    <p class="chat-message assistant">Which budget should cover this? I’ll carry its maximum and date limits into the instruction.</p>
-                    <div class="chat-budget-choices">
-                      @for (budget of budgets(); track budget.id) {
-                        @if (budget.active) {
-                          <button type="button" class="chat-budget-choice" [class.chosen]="instructionBudgetId === budget.id" (click)="chooseInstructionBudget(budget.id)">
-                            <strong>{{ budget.name }}</strong>
-                            <span>Maximum {{ formatAllocationAmount(budget) }}</span>
-                            @if (budgetDatesLabel(budget)) {<small>{{ budgetDatesLabel(budget) }}</small>}
-                          </button>
+                  <section class="chat-draft-actions" aria-label="Draft instruction actions">
+                    <div class="chat-draft-summary">
+                      <div class="chat-draft-meta-row">
+                        <span class="chat-meta-item">Area: <strong>{{ memberCategoryLabel(instructionMemberCategory) }}</strong></span>
+                        @if (budgets().length > 0) {
+                          <label class="chat-budget-select-label">
+                            <span>Budget:</span>
+                            <select [ngModel]="instructionBudgetId" (ngModelChange)="chooseInstructionBudget($event)">
+                              <option value="">No budget attached</option>
+                              @for (budget of budgets(); track budget.id) {
+                                @if (budget.active) {
+                                  <option [value]="budget.id">{{ budget.name }} (max {{ formatAllocationAmount(budget) }})</option>
+                                }
+                              }
+                            </select>
+                          </label>
+                        } @else {
+                          <small class="chat-budget-note">No active budgets. You can attach one later before activation.</small>
                         }
-                      }
-                    </div>
-                    <button type="button" class="dash-text-button" (click)="chooseInstructionBudget('')">Continue without a budget</button>
-                    @if (budgets().length === 0) {
-                      <p class="instruction-field-help">You can create a budget in Account and attach it later. A budget is required before activation.</p>
-                    }
-                  }
-                  @if (instructionChatStep() === 'review') {
-                    <p class="chat-message member">{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'I’ll choose a budget later' }}</p>
-                    <p class="chat-message assistant">{{ selectedInstruction() ? 'Review your changes before saving. This updates the draft only; it does not schedule or make a purchase.' : 'I have enough to save this draft. You can review it before activation. It won’t schedule or make a purchase.' }}</p>
-                    <div class="chat-review-summary">
-                      <span>{{ memberCategoryLabel(instructionMemberCategory) }}</span>
-                      <strong>{{ instructionBudgetId ? budgetLabel(instructionBudgetId) : 'No budget selected' }}</strong>
+                      </div>
                       @if (selectedInstructionBudget(); as selectedBudget) {
-                        <small>Maximum {{ formatAllocationAmount(selectedBudget) }} · {{ budgetDatesLabel(selectedBudget) || 'No date limits' }}</small>
-                      } @else {
-                        <small>A budget is required before activation.</small>
+                        <small class="chat-budget-detail">Maximum {{ formatAllocationAmount(selectedBudget) }} · {{ budgetDatesLabel(selectedBudget) || 'No date limits' }}</small>
                       }
                     </div>
                     <div class="instruction-form-actions">
-                      <button class="dash-secondary" type="button" (click)="advanceInstructionChat('budget')">Back</button>
-                      <button class="dash-primary" type="button" (click)="saveInstructionDraft()" [disabled]="instructionSaving()">{{ instructionSaving() ? 'Saving…' : selectedInstruction() ? 'Save changes' : 'Save instruction' }}</button>
+                      <button class="dash-primary" type="button" (click)="saveInstructionDraft()" [disabled]="instructionSaving() || instructionDescription.trim().length < 3">
+                        {{ instructionSaving() ? 'Saving…' : selectedInstruction() ? 'Save changes' : 'Save draft instruction' }}
+                      </button>
                     </div>
-                  }
+                  </section>
                 }
               </div>
 
               @if (!selectedInstruction() || selectedInstruction()?.state === 'DRAFT') {
                 <form class="instruction-chat-composer" (ngSubmit)="sendInstructionMessage()">
+                  <div class="instruction-category-bar" role="radiogroup" aria-label="Instruction workspace area">
+                    <span class="category-bar-label">Area:</span>
+                    @for (category of memberCategories; track category.id) {
+                      <button
+                        type="button"
+                        class="category-chip"
+                        [class.selected]="instructionMemberCategory === category.id"
+                        [attr.aria-checked]="instructionMemberCategory === category.id"
+                        role="radio"
+                        (click)="instructionMemberCategory = category.id">
+                        {{ category.label }}
+                      </button>
+                    }
+                  </div>
                   <label class="visually-hidden" for="instruction-composer-input">Your message or instruction</label>
                   <div class="instruction-composer-card">
                     <textarea

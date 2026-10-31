@@ -375,19 +375,21 @@ export class AppComponent implements OnInit {
 
     this.instructionComposerInput = '';
 
+    // If answering clarification questions:
     if (this.instructionProposal()?.questions && this.instructionProposal()!.questions.length > 0) {
       this.instructionAssistantReply = text;
       void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
       return;
     }
 
-    if (!this.instructionDescription || this.instructionChatStep() === 'prompt') {
+    // Initial instruction prompt:
+    if (!this.instructionDescription) {
       this.instructionDescription = text;
-      this.submitInstructionPrompt();
-      this.scrollChatToBottom();
+      void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
       return;
     }
 
+    // Subsequent instructions or refinements:
     this.instructionAssistantReply = text;
     void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
   }
@@ -407,7 +409,8 @@ export class AppComponent implements OnInit {
 
   editCurrentWording(): void {
     this.instructionComposerInput = this.instructionDescription;
-    this.advanceInstructionChat('prompt');
+    this.instructionDescription = '';
+    this.clearAssistantProposal();
     setTimeout(() => {
       const el = document.getElementById('instruction-composer-input');
       if (el) el.focus();
@@ -450,6 +453,7 @@ export class AppComponent implements OnInit {
     if (this.instructionAssistantBusy() || this.instructionDescription.trim().length < 3) return;
     this.instructionAssistantBusy.set(true);
     this.instructionError.set(null);
+    this.scrollChatToBottom();
     try {
       const requestedDescription = this.instructionDescription;
       const requestedInstructionId = this.selectedInstruction()?.id ?? null;
@@ -479,10 +483,12 @@ export class AppComponent implements OnInit {
           validUntilLocal: this.instructionValidUntilLocal,
         } }));
       }
+      this.scrollChatToBottom();
     } catch (error) {
       this.instructionError.set(this.errorMessage(error, 'AI suggestions are unavailable. Continue with the guided setup.'));
     } finally {
       this.instructionAssistantBusy.set(false);
+      this.scrollChatToBottom();
     }
   }
 
