@@ -33,6 +33,12 @@
 ## Agent-Specific Instructions
 - The PRD owns behavior; technical requirements own execution contracts; the schema implements them. Update affected consumers together.
 - Keep external execution disabled until the documented capability gates pass. Do not substitute payment providers or implement deferred holds/escrow without a scope decision.
+- **Mandatory Collaboration Lifecycle**: Always follow **Problem → Solution → Plan → Signed → Implementation**.
+  1. **Problem**: Identify root cause with concrete evidence, logs, or metrics.
+  2. **Solution**: Present and discuss viable options and trade-offs.
+  3. **Plan**: Formulate a clear, step-by-step implementation plan.
+  4. **Signed**: Halt and wait for user sign-off ("signed" / "proceed") before applying modifications.
+  5. **Implementation**: Execute the approved plan cleanly, verify with tests, and report evidence. Never apply speculative trial-and-error shotgun fixes.
 
 ## Commit Attribution
 - AI-authored commits must include a `Co-Authored-By:` trailer identifying the agent model and attribution byline.
