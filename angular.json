@@ -41,6 +41,11 @@
         },
         "serve": {
           "builder": "@angular-devkit/build-angular:dev-server",
+          "options": {
+            "liveReload": false,
+            "disableHostCheck": true,
+            "allowedHosts": ["all"]
+          },
           "configurations": {
             "production": { "buildTarget": "appai-website:build:production" },
             "development": { "buildTarget": "appai-website:build:development" }
