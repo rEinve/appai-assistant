@@ -15,6 +15,7 @@ Baseline: **v1.1, 31 October 2026**. The local member application and PostgreSQL
 9. [M1 evidence report](M1-EVIDENCE.md): current local build, domain-test and migration evidence with remaining gaps.
 10. [Work status log](WORK-STATUS.md): concise implementation, proof and dependency status across the product.
 11. [Member prompt and supplier discovery design](MEMBER-PROMPT-AND-SUPPLIER-DISCOVERY-DESIGN.md): owner-confirmed direction for prompt-first instructions, budget inheritance, member privacy, supplier discovery, permission modes and PayPal-only initial payment.
+12. [PRD drift and clarification tracking](PRD-DRIFT-AND-CLARIFICATION-TRACKING.md): active audit log tracking behavioral alignment, defect drift (dual inputs, 6-reply cutoff), additions (synthesized directives, PayPal badges), and clarifications.
 
 The PRD owns behavior, the technical document owns execution/state/API contracts, and the schema implements them. When they conflict, fix the owning specification and affected consumers together; a coding agent must not resolve a payment-authority conflict by guessing. A missing vendor capability returns unsupported/blocked rather than silently introducing browser checkout or another payment provider.
 
