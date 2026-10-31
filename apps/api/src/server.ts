@@ -7,7 +7,8 @@ import { createAuthRuntime, resolveMember } from './auth';
 const port = Number(process.env['APP_PORT'] ?? 4300);
 const mode = process.env['PAYPAL_DEMO_MODE'] ?? 'fixture';
 const webOrigin = process.env['WEB_APP_ORIGIN'] ?? 'http://localhost:4200';
-const trustedOrigins = new Set([webOrigin, 'https://appai.local']);
+const extraOrigins = (process.env['TRUSTED_ORIGINS'] ?? '').split(',').map((o) => o.trim()).filter(Boolean);
+const trustedOrigins = new Set([webOrigin, 'https://appai.local', 'https://appai.themeshak.com', ...extraOrigins]);
 
 function originMatches(origin?: string): boolean {
   return typeof origin === 'string' && trustedOrigins.has(origin);
