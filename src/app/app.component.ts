@@ -1221,6 +1221,9 @@ export class AppComponent implements OnInit {
         this.selectedInstruction.set(result.instruction);
         this.instructionEditors.update((editors) => ({ ...editors, [selected.id]: this.editorFor(result.instruction) }));
         this.instructionDescription = result.instruction.promptText ?? this.instructionDescription;
+        this.instructionProposal.set(null);
+        this.instructionAssistantTurns.set([]);
+        this.instructionAssistantReply = '';
         this.instructionChatStep.set('prompt');
         this.instructionNotice.set('Draft updated. It still needs review before activation.');
         return;
@@ -1252,6 +1255,9 @@ export class AppComponent implements OnInit {
         : profile);
       this.selectedInstruction.set(result.instruction);
       this.instructionDescription = result.instruction.promptText ?? this.instructionDescription;
+      this.instructionProposal.set(null);
+      this.instructionAssistantTurns.set([]);
+      this.instructionAssistantReply = '';
       this.draftIdempotencyKey = '';
       this.instructionNotice.set(`Instruction saved: ${result.instruction.structuredConstraints?.title || 'Draft instruction'}.`);
       this.dashboardView.set('Instructions');
