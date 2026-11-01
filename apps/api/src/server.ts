@@ -1,7 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { toNodeHandler } from 'better-auth/node';
-import { PayPalConfigurationError, PayPalSandboxClient, paypalConfigFromEnv, type PayPalOrderResult } from '../../../packages/adapters/paypal-sandbox/src/index';
+import {
+  PAYPAL_M0_CAPABILITY,
+  PayPalConfigurationError,
+  PayPalSandboxClient,
+  PayPalUnsupportedCapabilityError,
+  assertPayPalOperationSupported,
+  paypalConfigFromEnv,
+  type PayPalOrderResult,
+} from '../../../packages/adapters/paypal-sandbox/src/index';
 import { createAuthRuntime, resolveMember } from './auth';
 
 const port = Number(process.env['APP_PORT'] ?? 4300);
@@ -149,7 +157,17 @@ function client(): PayPalSandboxClient {
 
 function fixtureOrder(input: Record<string, unknown>): PayPalOrderResult {
   const id = `FIXTURE-${randomUUID()}`;
-  const order = { id, status: 'CREATED', approvalUrl: `http://localhost:4200/demo/paypal/approve/${id}`, raw: { id, status: 'CREATED', environment: 'FIXTURE', operation_id: input['operationId'] } };
+  const order: PayPalOrderResult = {
+    id,
+    status: 'CREATED',
+    approvalUrl: `http://localhost:4200/demo/paypal/approve/${id}`,
+    roles: {
+      buyerRole: 'AUTHENTICATED_MEMBER_FIXTURE_BUYER',
+      callerRole: 'APPAI_FIXTURE_ADAPTER',
+      payeeRole: 'FIXTURE_MERCHANT',
+    },
+    raw: { id, status: 'CREATED', environment: 'FIXTURE', operation_id: input['operationId'] },
+  };
   fixtureOrders.set(id, order);
   return order;
 }
@@ -398,7 +416,11 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       const kinds = ['ONE_TIME', 'SCHEDULED', 'RECURRING_BILL', 'WATCH'];
       const categories = ['PRODUCT', 'BILL', 'ACCOMMODATION'];
       const modes = ['PRE_APPROVED', 'REVIEW_REQUIRED', 'NOTIFY_ONLY'];
-      const description = typeof input['description'] === 'string' ? input['description'] : '';
+      const description = typeof input['description'] === 'string' && input['description'].trim()
+        ? input['description']
+        : typeof input['prompt'] === 'string'
+          ? input['prompt']
+          : '';
       const normalizedDescription = description.trim();
       const kind = input['kind'] ?? 'ONE_TIME';
       const category = input['category'] ?? null;
@@ -702,7 +724,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       }
     }
 
-    const messagesMatch = url.pathname.match(/^\/api\/v1\/instructions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/messages$/i);
+    const messagesMatch = url.pathname.match(/^\/api\/v1\/instructions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(messages|conversation)$/i);
     if (messagesMatch && (request.method === 'GET' || request.method === 'POST')) {
       if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
       const member = await resolveMember(authRuntime, request.headers);
@@ -867,7 +889,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
                timezone_snapshot = COALESCE(timezone_snapshot, $7),
                category = COALESCE(category, $8),
                structured_constraints = $9::jsonb,
-               version = version + 1, updated_at = now()
+               version = version + 1, permission_version = permission_version + 1, updated_at = now()
            WHERE id = $10
            RETURNING id, prompt_text AS "promptText", member_category AS "memberCategory", kind, category, mode, state,
                      execution_environment AS "executionEnvironment", budget_id AS "budgetId",
@@ -875,6 +897,19 @@ Suggestions require member review and never authorize a purchase or schedule.` }
                      valid_until AS "validUntil", timezone_snapshot AS "timezoneSnapshot", version,
                      structured_constraints AS "structuredConstraints", created_at AS "createdAt"`,
           [newAgreement.rows[0].id, selectedBudget?.id ?? null, maxTotalMinor, currency, validFrom, validUntil, timezone, category, JSON.stringify(constraints), instructionId],
+        );
+
+        await db.query(
+          `UPDATE jobs SET state = 'BLOCKED', last_error_code = 'INSTRUCTION_SCHEDULE_UPDATED',
+                  lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+           WHERE instruction_id = $1 AND owner_id = $2 AND state IN ('READY', 'RETRY_WAIT')`,
+          [instructionId, member.id],
+        );
+        await db.query(
+          `UPDATE approvals SET status = 'INVALIDATED', decided_at = now(), version = version + 1
+           WHERE owner_id = $1 AND status = 'PENDING'
+             AND operation_id IN (SELECT id FROM purchase_operations WHERE instruction_id = $2 AND owner_id = $1)`,
+          [member.id, instructionId],
         );
 
         await db.query('COMMIT');
@@ -922,7 +957,10 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         );
         const current = currentResult.rows[0];
         if (!current) { await db.query('ROLLBACK'); return json(response, 404, { code: 'INSTRUCTION_NOT_FOUND' }); }
-        if (current.state !== 'DRAFT') { await db.query('ROLLBACK'); return json(response, 409, { code: 'INSTRUCTION_NOT_EDITABLE', message: 'Only draft instructions can be configured.' }); }
+        if (!['DRAFT', 'ACTIVE', 'PAUSED'].includes(current.state)) {
+          await db.query('ROLLBACK');
+          return json(response, 409, { code: 'INSTRUCTION_NOT_EDITABLE', message: 'Cancelled, expired, or completed instructions cannot be reconfigured.' });
+        }
         const expectedVersion = Number(match[1]);
         if (Number(current.version) !== expectedVersion) { await db.query('ROLLBACK'); return json(response, 412, { code: 'VERSION_CONFLICT', message: 'This instruction changed after you loaded it. Reload and try again.' }); }
         const settings = await db.query<{ enabled_currency: string; currency_scale: number }>(
@@ -1014,7 +1052,9 @@ Suggestions require member review and never authorize a purchase or schedule.` }
                currency = CASE WHEN $4::bigint IS NULL AND $3::uuid IS NULL THEN NULL ELSE $5 END,
                valid_from = $6, valid_until = $7, timezone_snapshot = $8,
                structured_constraints = $9::jsonb, constraints_schema_version = '1.1',
-               schedule_config = $10::jsonb, watch_config = $11::jsonb, next_run_at = $12,
+               schedule_config = $10::jsonb, watch_config = $11::jsonb,
+               next_run_at = CASE WHEN state = 'PAUSED' THEN NULL ELSE $12::timestamptz END,
+               paused_next_run_at = CASE WHEN state = 'PAUSED' THEN $12::timestamptz ELSE NULL END,
                prompt_text = $14, member_category = $15,
                version = version + 1, permission_version = permission_version + 1, updated_at = now()
            WHERE id = $1 AND owner_id = $2 AND version = $13
@@ -1026,6 +1066,20 @@ Suggestions require member review and never authorize a purchase or schedule.` }
                      structured_constraints AS "structuredConstraints", created_at AS "createdAt"`,
           [configurationMatch[1], member.id, selectedBudget?.id ?? null, effectiveMaxTotalMinor, accountSettings.enabled_currency, effectiveValidFrom, effectiveValidUntil, timezone, JSON.stringify(constraints), scheduleConfig ? JSON.stringify(scheduleConfig) : null, watchConfig ? JSON.stringify(watchConfig) : null, effectiveFirstRunAt, expectedVersion, promptText, memberCategory],
         );
+        if (current.state === 'ACTIVE' || current.state === 'PAUSED') {
+          await db.query(
+            `UPDATE jobs SET state = 'BLOCKED', last_error_code = 'INSTRUCTION_SCHEDULE_UPDATED',
+                    lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+             WHERE instruction_id = $1 AND owner_id = $2 AND state IN ('READY', 'RETRY_WAIT')`,
+            [configurationMatch[1], member.id],
+          );
+          await db.query(
+            `UPDATE approvals SET status = 'INVALIDATED', decided_at = now(), version = version + 1
+             WHERE owner_id = $1 AND status = 'PENDING'
+               AND operation_id IN (SELECT id FROM purchase_operations WHERE instruction_id = $2 AND owner_id = $1)`,
+            [member.id, configurationMatch[1]],
+          );
+        }
         await db.query(
           `INSERT INTO audit_events (actor_type, actor_id, owner_id, instruction_id, action, old_state, new_state)
            VALUES ('MEMBER', $1, $2, $3, 'INSTRUCTION_CONFIGURATION_UPDATED', $4, $5)`,
@@ -1992,6 +2046,396 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         workspace: { instructionCount: Number(summary.rows[0]?.count ?? 0) },
       });
     }
+    if (request.method === 'GET' && url.pathname === '/api/v1/capabilities') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const adaptersResult = await authRuntime.pool.query<{
+        id: string;
+        adapterKey: string;
+        adapterVersion: string;
+        environment: string;
+        supportedCategories: string[];
+        capabilities: Record<string, unknown>;
+        status: string;
+        enabled: boolean;
+        executionEnabled: boolean;
+      }>(
+        `SELECT id, adapter_key AS "adapterKey", adapter_version AS "adapterVersion", environment,
+                COALESCE(capability->'categories', '[]'::jsonb) AS "supportedCategories",
+                capability AS capabilities, status,
+                enabled, execution_enabled AS "executionEnabled"
+         FROM vendor_adapters ORDER BY adapter_key ASC, environment ASC`,
+      );
+      return json(response, 200, {
+        liveExecutionEnabled: false,
+        paypalCapability: PAYPAL_M0_CAPABILITY,
+        prePurchaseReservationBoundary: {
+          reservationSupported: false,
+          blockedOperations: ['HOLD', 'AUTHORIZE', 'CAPTURE_HOLD', 'VOID_HOLD', 'DEPOSIT', 'BID', 'ESCROW'],
+          policy: 'MVP deterministically blocks unimplemented hold/deposit/bid/capture workflows.',
+        },
+        adapters: adaptersResult.rows,
+      });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/v1/capabilities/check') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const input = await body(request);
+      const adapterKey = typeof input['adapterKey'] === 'string' ? input['adapterKey'].trim() : '';
+      const category = typeof input['category'] === 'string' ? input['category'].trim() : '';
+      const operation = typeof input['operation'] === 'string' ? input['operation'].trim() : 'CREATE_ORDER';
+      const unattended = input['unattended'] === true;
+      const uiClosed = input['uiClosed'] === true;
+      try {
+        assertPayPalOperationSupported(operation);
+      } catch (err) {
+        if (err instanceof PayPalUnsupportedCapabilityError) {
+          return json(response, 422, {
+            allowed: false,
+            code: err.code,
+            operation: err.operation,
+            reason: err.message,
+          });
+        }
+        throw err;
+      }
+      if (adapterKey === 'webmcp-browser-host' && (unattended || uiClosed)) {
+        return json(response, 409, {
+          allowed: false,
+          code: 'ACTION_REQUIRED',
+          reason: 'WEBMCP_REQUIRES_FOREGROUND_SESSION',
+          message: 'WebMCP browser-assisted host requires an open user session and cannot run unattended or when the UI is closed.',
+        });
+      }
+      const adapterLookup = await authRuntime.pool.query<{
+        id: string;
+        adapterKey: string;
+        environment: string;
+        supportedCategories: string[];
+        capabilities: Record<string, unknown>;
+        status: string;
+        enabled: boolean;
+        executionEnabled: boolean;
+      }>(
+        `SELECT id, adapter_key AS "adapterKey", environment,
+                COALESCE(capability->'categories', '[]'::jsonb) AS "supportedCategories",
+                capability AS capabilities, status,
+                enabled, execution_enabled AS "executionEnabled"
+         FROM vendor_adapters WHERE adapter_key = $1 ORDER BY environment ASC LIMIT 1`,
+        [adapterKey],
+      );
+      const adapterRow = adapterLookup.rows[0];
+      if (!adapterRow || !adapterRow.enabled || adapterRow.status === 'DISABLED') {
+        return json(response, 422, {
+          allowed: false,
+          code: 'CAPABILITY_UNSUPPORTED',
+          reason: 'ADAPTER_UNAVAILABLE_OR_DISABLED',
+          adapterKey,
+        });
+      }
+      if (category && !adapterRow.supportedCategories.includes(category)) {
+        return json(response, 422, {
+          allowed: false,
+          code: 'CAPABILITY_UNSUPPORTED',
+          reason: 'CATEGORY_UNSUPPORTED_BY_ADAPTER',
+          adapterKey,
+          category,
+        });
+      }
+      return json(response, 200, {
+        allowed: true,
+        adapterKey: adapterRow.adapterKey,
+        environment: adapterRow.environment,
+        executionEnabled: adapterRow.executionEnabled,
+        capabilities: adapterRow.capabilities,
+      });
+    }
+    const connectionBeginMatch = url.pathname.match(/^\/api\/v1\/connections\/([^/]+)\/begin$/);
+    if (connectionBeginMatch && request.method === 'POST') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const adapterKey = decodeURIComponent(connectionBeginMatch[1]);
+      const input = await body(request);
+      const redirectUri = typeof input['redirectUri'] === 'string' && input['redirectUri'].trim()
+        ? input['redirectUri'].trim()
+        : `${webOrigin}/connections/callback`;
+      const adapterRow = await authRuntime.pool.query<{ id: string; environment: string }>(
+        `SELECT id, environment FROM vendor_adapters WHERE adapter_key = $1 AND enabled = true ORDER BY environment ASC LIMIT 1`,
+        [adapterKey],
+      );
+      if (!adapterRow.rows[0]) return json(response, 422, { code: 'CAPABILITY_UNSUPPORTED', message: `Adapter ${adapterKey} is unavailable.` });
+      const stateToken = `st_${randomUUID().replace(/-/g, '')}`;
+      const stateDigest = createHash('sha256').update(stateToken).digest('hex');
+      const pkceVerifierDigest = createHash('sha256').update(`pkce_${stateToken}`).digest('hex');
+      const sessionInsert = await authRuntime.pool.query<{ id: string; expiresAt: Date }>(
+        `INSERT INTO connection_sessions (owner_id, adapter_id, state_digest, protected_verifier_ref, requested_scope, expires_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, now() + interval '15 minutes')
+         RETURNING id, expires_at AS "expiresAt"`,
+        [member.id, adapterRow.rows[0].id, stateDigest, pkceVerifierDigest, JSON.stringify({ redirectUri })],
+      );
+      return json(response, 201, {
+        connectionSessionId: sessionInsert.rows[0].id,
+        adapterKey,
+        environment: adapterRow.rows[0].environment,
+        stateToken,
+        redirectUri,
+        expiresAt: sessionInsert.rows[0].expiresAt,
+      });
+    }
+    const connectionCallbackMatch = url.pathname.match(/^\/api\/v1\/connections\/([^/]+)\/callback$/);
+    if (connectionCallbackMatch && request.method === 'POST') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const adapterKey = decodeURIComponent(connectionCallbackMatch[1]);
+      const input = await body(request);
+      const stateToken = typeof input['stateToken'] === 'string' ? input['stateToken'].trim() : '';
+      if (!stateToken) return json(response, 400, { code: 'STATE_TOKEN_REQUIRED' });
+      const stateDigest = createHash('sha256').update(stateToken).digest('hex');
+      const externalAccountRef = typeof input['externalAccountRef'] === 'string' && input['externalAccountRef'].trim()
+        ? input['externalAccountRef'].trim()
+        : `payer-${member.id.slice(0, 8)}`;
+      const externalMandateRef = typeof input['externalMandateRef'] === 'string' && input['externalMandateRef'].trim()
+        ? input['externalMandateRef'].trim()
+        : `mandate-${member.id.slice(0, 8)}-${adapterKey}`;
+      const instructionId = typeof input['instructionId'] === 'string' && input['instructionId'].trim()
+        ? input['instructionId'].trim()
+        : null;
+      const db = await authRuntime.pool.connect();
+      try {
+        await db.query('BEGIN');
+        const sessionRes = await db.query<{
+          id: string;
+          adapterId: string;
+          adapterKey: string;
+          environment: string;
+          expiresAt: Date;
+          consumedAt: Date | null;
+        }>(
+          `SELECT cs.id, cs.adapter_id AS "adapterId", va.adapter_key AS "adapterKey",
+                  va.environment, cs.expires_at AS "expiresAt", cs.consumed_at AS "consumedAt"
+           FROM connection_sessions cs
+           JOIN vendor_adapters va ON va.id = cs.adapter_id
+           WHERE cs.owner_id = $1 AND cs.state_digest = $2 AND va.adapter_key = $3
+           FOR UPDATE OF cs`,
+          [member.id, stateDigest, adapterKey],
+        );
+        const session = sessionRes.rows[0];
+        if (!session) {
+          await db.query('ROLLBACK');
+          return json(response, 404, { code: 'CONNECTION_SESSION_NOT_FOUND' });
+        }
+        if (session.consumedAt) {
+          await db.query('ROLLBACK');
+          return json(response, 409, { code: 'CONNECTION_SESSION_ALREADY_CONSUMED' });
+        }
+        if (new Date(session.expiresAt) <= new Date()) {
+          await db.query('ROLLBACK');
+          return json(response, 410, { code: 'CONNECTION_SESSION_EXPIRED' });
+        }
+        await db.query('UPDATE connection_sessions SET consumed_at = now() WHERE id = $1', [session.id]);
+        const accountRes = await db.query<{ id: string; sessionStatus: string }>(
+          `INSERT INTO vendor_accounts
+            (owner_id, adapter_id, external_account_ref, credential_store_ref, session_status, session_checked_at)
+           VALUES ($1, $2, $3, $4, 'ACTIVE', now())
+           ON CONFLICT (owner_id, adapter_id, external_account_ref)
+           DO UPDATE SET session_status = 'ACTIVE', reauth_reason = NULL, session_checked_at = now(), updated_at = now()
+           RETURNING id, session_status AS "sessionStatus"`,
+          [member.id, session.adapterId, externalAccountRef, `vault://connections/${member.id}/${adapterKey}`],
+        );
+        const vendorAccountId = accountRes.rows[0].id;
+        const mandateRes = await db.query<{ id: string; status: string }>(
+          `INSERT INTO funding_mandates
+            (owner_id, adapter_id, vendor_account_id, provider_agreement_ref, buyer_role, caller_role, payee_role, status, currency, valid_until)
+           VALUES ($1, $2, $3, $4, 'AUTHENTICATED_MEMBER_PAYPAL_BUYER', 'APPAI_OAUTH_CLIENT_CREDENTIALS', 'VERIFIED_SANDBOX_MERCHANT', 'ACTIVE', 'USD', now() + interval '30 days')
+           ON CONFLICT (owner_id, adapter_id, provider_agreement_ref)
+           DO UPDATE SET status = 'ACTIVE', revoked_at = NULL, valid_until = now() + interval '30 days', updated_at = now()
+           RETURNING id, status`,
+          [member.id, session.adapterId, vendorAccountId, externalMandateRef],
+        );
+        const fundingMandateId = mandateRes.rows[0].id;
+        if (instructionId) {
+          await db.query(
+            `UPDATE procurement_instructions
+             SET vendor_account_id = $3, funding_mandate_id = $4, updated_at = now()
+             WHERE id = $1 AND owner_id = $2`,
+            [instructionId, member.id, vendorAccountId, fundingMandateId],
+          );
+        }
+        await db.query(
+          `INSERT INTO audit_events (actor_type, actor_id, owner_id, instruction_id, action, new_state, safe_reason, correlation_id)
+           VALUES ('MEMBER', $1, $2, $3, 'PROVIDER_CONSENT_CONNECTED', 'ACTIVE', 'M0_CONSENT_AND_ROLES_VERIFIED', $4)`,
+          [member.authUserId, member.id, instructionId, session.id],
+        );
+        await db.query('COMMIT');
+        return json(response, 200, {
+          vendorAccountId,
+          fundingMandateId,
+          adapterKey,
+          environment: session.environment,
+          sessionStatus: accountRes.rows[0].sessionStatus,
+          mandateStatus: mandateRes.rows[0].status,
+          roles: {
+            buyerRole: PAYPAL_M0_CAPABILITY.buyerRole,
+            callerRole: PAYPAL_M0_CAPABILITY.callerRole,
+            payeeRole: PAYPAL_M0_CAPABILITY.payeeRole,
+          },
+        });
+      } catch (err) {
+        await db.query('ROLLBACK');
+        throw err;
+      } finally {
+        db.release();
+      }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/v1/connections') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const accounts = await authRuntime.pool.query(
+        `SELECT va.id, va.adapter_id AS "adapterId", ad.adapter_key AS "adapterKey", ad.environment,
+                va.external_account_ref AS "externalAccountRef", va.category_scope AS "categoryScope",
+                va.session_status AS "sessionStatus", va.reauth_reason AS "reauthReason",
+                va.session_checked_at AS "sessionCheckedAt"
+         FROM vendor_accounts va
+         JOIN vendor_adapters ad ON ad.id = va.adapter_id
+         WHERE va.owner_id = $1 ORDER BY va.created_at DESC`,
+        [member.id],
+      );
+      const mandates = await authRuntime.pool.query(
+        `SELECT fm.id, fm.adapter_id AS "adapterId", ad.adapter_key AS "adapterKey", ad.environment,
+                fm.provider_agreement_ref AS "providerAgreementRef", fm.status,
+                fm.buyer_role AS "buyerRole", fm.caller_role AS "callerRole", fm.payee_role AS "payeeRole",
+                fm.currency, fm.unattended_supported AS "unattendedSupported",
+                fm.valid_from AS "validFrom", fm.valid_until AS "validUntil", fm.revoked_at AS "revokedAt"
+         FROM funding_mandates fm
+         JOIN vendor_adapters ad ON ad.id = fm.adapter_id
+         WHERE fm.owner_id = $1 ORDER BY fm.created_at DESC`,
+        [member.id],
+      );
+      return json(response, 200, { accounts: accounts.rows, mandates: mandates.rows });
+    }
+    const connectionExpireMatch = url.pathname.match(/^\/api\/v1\/connections\/([^/]+)\/expire-session$/);
+    if (connectionExpireMatch && request.method === 'POST') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const vendorAccountId = decodeURIComponent(connectionExpireMatch[1]);
+      const db = await authRuntime.pool.connect();
+      try {
+        await db.query('BEGIN');
+        const updated = await db.query<{ id: string }>(
+          `UPDATE vendor_accounts
+           SET session_status = 'EXPIRED', reauth_reason = 'SESSION_EXPIRED',
+               session_checked_at = now(), version = version + 1, updated_at = now()
+           WHERE id = $1 AND owner_id = $2
+           RETURNING id`,
+          [vendorAccountId, member.id],
+        );
+        if (!updated.rows[0]) {
+          await db.query('ROLLBACK');
+          return json(response, 404, { code: 'CONNECTION_NOT_FOUND' });
+        }
+        const blockedJobs = await db.query<{ id: string }>(
+          `UPDATE jobs j
+           SET state = 'BLOCKED', last_error_code = 'REAUTH_REQUIRED',
+               lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+           FROM procurement_instructions i
+           WHERE j.instruction_id = i.id AND j.owner_id = $1 AND i.owner_id = $1
+             AND i.vendor_account_id = $2
+             AND j.state IN ('READY', 'RETRY_WAIT')
+             AND j.job_type IN ('RUN_OCCURRENCE', 'OBSERVE')
+           RETURNING j.id`,
+          [member.id, vendorAccountId],
+        );
+        await db.query(
+          `INSERT INTO audit_events (actor_type, actor_id, owner_id, action, new_state, safe_reason, correlation_id)
+           VALUES ('MEMBER', $1, $2, 'VENDOR_SESSION_EXPIRED', 'REAUTH_REQUIRED', 'SESSION_EXPIRED_PRE_DISPATCH_BLOCK', $3)`,
+          [member.authUserId, member.id, vendorAccountId],
+        );
+        await db.query('COMMIT');
+        return json(response, 200, {
+          vendorAccountId,
+          sessionStatus: 'EXPIRED',
+          reauthReason: 'SESSION_EXPIRED',
+          blockedPreDispatchJobs: blockedJobs.rowCount ?? 0,
+        });
+      } catch (err) {
+        await db.query('ROLLBACK');
+        throw err;
+      } finally {
+        db.release();
+      }
+    }
+    const connectionRevokeMatch = url.pathname.match(/^\/api\/v1\/connections\/([^/]+)\/revoke$/);
+    if (connectionRevokeMatch && request.method === 'POST') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const targetId = decodeURIComponent(connectionRevokeMatch[1]);
+      const db = await authRuntime.pool.connect();
+      try {
+        await db.query('BEGIN');
+        const mandateUpdate = await db.query<{ id: string }>(
+          `UPDATE funding_mandates
+           SET status = 'REVOKED', revoked_at = now(), updated_at = now()
+           WHERE id = $1 AND owner_id = $2
+           RETURNING id`,
+          [targetId, member.id],
+        );
+        const accountUpdate = await db.query<{ id: string }>(
+          `UPDATE vendor_accounts
+           SET session_status = 'REVOKED', reauth_reason = 'MANDATE_OR_CONNECTION_REVOKED', updated_at = now()
+           WHERE id = $1 AND owner_id = $2
+           RETURNING id`,
+          [targetId, member.id],
+        );
+        if (!mandateUpdate.rows[0] && !accountUpdate.rows[0]) {
+          await db.query('ROLLBACK');
+          return json(response, 404, { code: 'CONNECTION_OR_MANDATE_NOT_FOUND' });
+        }
+        const blockedJobs = await db.query<{ id: string }>(
+          `UPDATE jobs j
+           SET state = 'BLOCKED', last_error_code = 'MANDATE_REVOKED',
+               lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+           FROM procurement_instructions i
+           WHERE j.instruction_id = i.id AND j.owner_id = $1 AND i.owner_id = $1
+             AND (i.funding_mandate_id = $2 OR i.vendor_account_id = $2)
+             AND j.state IN ('READY', 'RETRY_WAIT')
+             AND j.job_type IN ('RUN_OCCURRENCE', 'OBSERVE')
+           RETURNING j.id`,
+          [member.id, targetId],
+        );
+        const preservedReconcileJobs = await db.query<{ id: string }>(
+          `SELECT j.id FROM jobs j
+           JOIN procurement_instructions i ON i.id = j.instruction_id AND i.owner_id = j.owner_id
+           WHERE j.owner_id = $1 AND (i.funding_mandate_id = $2 OR i.vendor_account_id = $2)
+             AND j.state IN ('READY', 'RETRY_WAIT', 'RUNNING')
+             AND j.job_type IN ('RECONCILE', 'CANCEL_RECONCILE')`,
+          [member.id, targetId],
+        );
+        await db.query(
+          `INSERT INTO audit_events (actor_type, actor_id, owner_id, action, new_state, safe_reason, correlation_id)
+           VALUES ('MEMBER', $1, $2, 'MANDATE_OR_CONNECTION_REVOKED', 'REVOKED', 'FUTURE_WORK_STOPPED_RECONCILIATION_PRESERVED', $3)`,
+          [member.authUserId, member.id, targetId],
+        );
+        await db.query('COMMIT');
+        return json(response, 200, {
+          revokedId: targetId,
+          status: 'REVOKED',
+          blockedFutureJobs: blockedJobs.rowCount ?? 0,
+          preservedReconcileJobs: preservedReconcileJobs.rowCount ?? 0,
+        });
+      } catch (err) {
+        await db.query('ROLLBACK');
+        throw err;
+      } finally {
+        db.release();
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/demo/paypal/config') return json(response, 200, { mode, sandboxBaseUrl: 'https://api-m.sandbox.paypal.com', credentialsConfigured: Boolean(process.env['PAYPAL_CLIENT_ID'] && process.env['PAYPAL_CLIENT_SECRET']), liveExecutionEnabled: false });
     if (request.method === 'POST' && url.pathname === '/api/demo/paypal/orders') {
       const input = await body(request);
@@ -2030,7 +2474,29 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           const verified = await client().verifyWebhook({ transmissionId: request.headers['paypal-transmission-id'] as string, transmissionTime: request.headers['paypal-transmission-time'] as string, certUrl: request.headers['paypal-cert-url'] as string, authAlgo: request.headers['paypal-auth-algo'] as string, transmissionSig: request.headers['paypal-transmission-sig'] as string }, event);
           if (!verified) return json(response, 400, { code: 'WEBHOOK_SIGNATURE_INVALID' });
         } else if (request.headers['x-demo-signature'] !== 'fixture') return json(response, 400, { code: 'FIXTURE_SIGNATURE_REQUIRED' });
-        return json(response, 202, { accepted: true, eventType: event['event_type'] ?? 'UNKNOWN', verified: true });
+        let persistedEventId: string | null = null;
+        if (authRuntime) {
+          const adapterEnv = mode === 'sandbox' ? 'SANDBOX' : 'FIXTURE';
+          const adapterKey = mode === 'sandbox' ? 'paypal-sandbox' : 'local-fixture';
+          const adapterRow = await authRuntime.pool.query<{ id: string }>(
+            'SELECT id FROM vendor_adapters WHERE adapter_key = $1 AND environment = $2 LIMIT 1',
+            [adapterKey, adapterEnv],
+          );
+          if (adapterRow.rows[0]) {
+            const externalEventId = typeof event['id'] === 'string' && event['id'].trim() ? event['id'].trim() : `evt_${randomUUID()}`;
+            const eventType = typeof event['event_type'] === 'string' && event['event_type'].trim() ? event['event_type'].trim() : 'UNKNOWN';
+            const payloadDigest = createHash('sha256').update(JSON.stringify(event)).digest('hex');
+            const inserted = await authRuntime.pool.query<{ id: string }>(
+              `INSERT INTO provider_events (adapter_id, environment, external_event_id, event_type, signature_verified, redacted_payload, processed_at)
+               VALUES ($1, $2, $3, $4, true, $5::jsonb, now())
+               ON CONFLICT (adapter_id, environment, external_event_id) DO NOTHING
+               RETURNING id`,
+              [adapterRow.rows[0].id, adapterEnv, externalEventId, eventType, JSON.stringify({ eventType, payloadDigest, resourceId: (event['resource'] as Record<string, unknown> | undefined)?.['id'] ?? null })],
+            );
+            persistedEventId = inserted.rows[0]?.id ?? null;
+          }
+        }
+        return json(response, 202, { accepted: true, eventType: event['event_type'] ?? 'UNKNOWN', verified: true, persistedEventId });
       }
       return json(response, 405, { code: 'METHOD_NOT_ALLOWED' });
     }

@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Appai UI Prototype Sandbox</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;750&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- Prototype State Controller Switcher -->
+  <aside class="prototype-controller">
+    <div class="prototype-brand">
+      <span class="material-symbols-outlined icon-brand">science</span>
+      <div>
+        <strong>UI Sandbox Prototype</strong>
+        <small>Interactive Lifecycle Stages</small>
+      </div>
+    </div>
+    <div class="prototype-stages" role="tablist">
+      <button class="stage-btn active" data-stage="intake">
+        <span class="stage-num">1</span>
+        <span>Intake & Discovery</span>
+      </button>
+      <button class="stage-btn" data-stage="agreement">
+        <span class="stage-num">2</span>
+        <span>De-Boxed Agreement</span>
+      </button>
+      <button class="stage-btn" data-stage="activated">
+        <span class="stage-num">3</span>
+        <span>Active & Execution (Next)</span>
+      </button>
+      <button class="stage-btn" data-stage="planner">
+        <span class="stage-num">4</span>
+        <span>Planner Projection</span>
+      </button>
+    </div>
+    <div class="prototype-mode-info">
+      <span class="material-symbols-outlined info-icon">info</span>
+      <p>Testing single-surface layouts without nested card clutter. Material symbols enabled.</p>
+    </div>
+  </aside>
+
+  <!-- Main App Surface -->
+  <div class="app-layout">
+    <!-- Clean Minimal Navigation Sidebar -->
+    <nav class="app-sidebar">
+      <div class="sidebar-header">
+        <div class="brand-row">
+          <span class="app-logo-dot"></span>
+          <span class="brand-name">Appai</span>
+        </div>
+        <span class="env-tag">Sandbox</span>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">YOUR WORKSPACE</div>
+        <button class="nav-item active">
+          <span class="material-symbols-outlined nav-icon">chat</span>
+          <span>Instructions</span>
+          <span class="nav-count">5</span>
+        </button>
+        <button class="nav-item" id="nav-planner-btn">
+          <span class="material-symbols-outlined nav-icon">calendar_month</span>
+          <span>Planner</span>
+        </button>
+        <button class="nav-item">
+          <span class="material-symbols-outlined nav-icon">account_balance_wallet</span>
+          <span>Budgets</span>
+        </button>
+        <button class="nav-item">
+          <span class="material-symbols-outlined nav-icon">settings</span>
+          <span>Account</span>
+        </button>
+      </div>
+
+      <div class="nav-section instructions-tree">
+        <div class="nav-label">RECENT INSTRUCTIONS</div>
+        <div class="recent-list">
+          <button class="recent-item active" data-instruction="kisutu">
+            <span class="recent-title">Scout Kisutu Branch Office Space</span>
+            <span class="recent-meta">Work · Active</span>
+          </button>
+          <button class="recent-item" data-instruction="safari">
+            <span class="recent-title">Procure 7-Day Southern Circuit Tour</span>
+            <span class="recent-meta">Travel · Draft</span>
+          </button>
+          <button class="recent-item" data-instruction="windsor">
+            <span class="recent-title">Windsor trip accommodations</span>
+            <span class="recent-meta">Travel · Draft</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <div class="avatar">M</div>
+          <div class="user-info">
+            <strong>Meshack</strong>
+            <small>meshack@example.com</small>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Workspace Area -->
+    <main class="app-main">
+
+      <!-- ============================================== -->
+      <!-- STAGE 1: INTAKE & CONCIERGE SCOUTING          -->
+      <!-- ============================================== -->
+      <section class="stage-view" id="view-intake">
+        <header class="main-header">
+          <div>
+            <p class="eyebrow">YOUR INSTRUCTIONS</p>
+            <h1>Let’s set it up</h1>
+          </div>
+        </header>
+
+        <div class="chat-thread">
+          <!-- Assistant Initial Greeting -->
+          <div class="msg msg-assistant">
+            <div class="msg-avatar">
+              <span class="material-symbols-outlined">smart_toy</span>
+            </div>
+            <div class="msg-bubble">
+              <p>Hi Meshack, what would you like handled? Write it naturally. I’ll keep your wording as the instruction.</p>
+            </div>
+          </div>
+
+          <!-- Member Request Bubble -->
+          <div class="msg msg-member">
+            <div class="msg-bubble">
+              <p>I'm looking for the new branch office in downtown area Kisutu Area I can get an office opening I don't have any floor space requrement and budget as am poiking market availability we can discuss your findings, thats your are required to find can choose from what available</p>
+              <button class="text-link-btn">
+                <span class="material-symbols-outlined btn-icon-small">edit</span>
+                <span>Edit wording</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Assistant Concierge Synthesis -->
+          <div class="msg msg-assistant">
+            <div class="msg-avatar">
+              <span class="material-symbols-outlined">smart_toy</span>
+            </div>
+            <div class="msg-bubble">
+              <p>Hello! I have initiated a market survey for commercial office spaces in the Kisutu / Downtown Dar es Salaam district. Prime commercial and serviced office units in this area typically range from <strong>TZS 1,500,000 to TZS 4,500,000</strong> per month depending on floor size, amenities, and finishings. Below are three representative commercial spaces and serviced office hubs in Kisutu and central Dar es Salaam that accept electronic settlement or PayPal-invoiced leasing arrangements.</p>
+
+              <!-- Scouted Candidates Leads (Clean, modern list) -->
+              <div class="leads-card">
+                <div class="leads-header">
+                  <div class="leads-title-row">
+                    <span class="material-symbols-outlined leads-icon">search_insights</span>
+                    <strong>Scouted Options & Candidate Leads</strong>
+                  </div>
+                  <span class="count-badge">3 verified candidates</span>
+                </div>
+
+                <div class="leads-list">
+                  <div class="lead-item selected">
+                    <div class="lead-top">
+                      <div class="lead-title-area">
+                        <strong>Kisutu Commercial Centre Executive Suite</strong>
+                        <div class="lead-badges">
+                          <span class="badge-rail"><span class="material-symbols-outlined badge-icon">verified</span> PayPal</span>
+                          <span class="badge-rate">TZS 2,500,000 / month</span>
+                        </div>
+                      </div>
+                      <button class="btn-select-vendor active" data-vendor="Kisutu Commercial Centre Executive Suite">
+                        <span class="material-symbols-outlined btn-icon-small">check</span>
+                        <span>Selected for Booking</span>
+                      </button>
+                    </div>
+                    <p class="lead-desc">Fitted commercial office suite in central Kisutu with backup generator, dedicated parking, and PayPal-invoiced corporate retainer options.</p>
+                  </div>
+
+                  <div class="lead-item">
+                    <div class="lead-top">
+                      <div class="lead-title-area">
+                        <strong>Bakhresa / Jamhuri St Managed Office Hub</strong>
+                        <div class="lead-badges">
+                          <span class="badge-rail"><span class="material-symbols-outlined badge-icon">verified</span> PayPal</span>
+                          <span class="badge-rate">TZS 1,800,000 / month</span>
+                        </div>
+                      </div>
+                      <button class="btn-select-vendor" data-vendor="Bakhresa / Jamhuri St Managed Office Hub">
+                        <span>Choose this Provider</span>
+                      </button>
+                    </div>
+                    <p class="lead-desc">Convenient downtown branch location adjacent to Kisutu transport links, inclusive of fiber internet and PayPal business invoicing.</p>
+                  </div>
+
+                  <div class="lead-item">
+                    <div class="lead-top">
+                      <div class="lead-title-area">
+                        <strong>Indira Gandhi Street Serviced Branch Office</strong>
+                        <div class="lead-badges">
+                          <span class="badge-rail"><span class="material-symbols-outlined badge-icon">verified</span> PayPal</span>
+                          <span class="badge-rate">TZS 3,500,000 / month</span>
+                        </div>
+                      </div>
+                      <button class="btn-select-vendor" data-vendor="Indira Gandhi Street Serviced Branch Office">
+                        <span>Choose this Provider</span>
+                      </button>
+                    </div>
+                    <p class="lead-desc">Turnkey open-plan commercial floor plate with reception and security, managed by an agency that accepts international PayPal payments.</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- One-Tap Action to Proceed to Agreement -->
+              <div class="intake-cta-strip">
+                <div>
+                  <strong>Ready to establish this instruction?</strong>
+                  <p>Appai will store this directive and track matching providers under your Work category.</p>
+                </div>
+                <button class="btn-primary" id="btn-goto-agreement">
+                  <span>Confirm & Save Instruction</span>
+                  <span class="material-symbols-outlined btn-icon-right">arrow_forward</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- Composer Bottom Bar -->
+        <footer class="composer-container">
+          <div class="composer-area-selector">
+            <span class="area-label">Area:</span>
+            <button class="area-pill">Personal</button>
+            <button class="area-pill">Household</button>
+            <button class="area-pill active">Work</button>
+            <button class="area-pill">Travel</button>
+            <button class="area-pill">Other</button>
+          </div>
+          <div class="composer-box">
+            <textarea placeholder="Add details or instructions… (Press Enter to send)" rows="2"></textarea>
+            <div class="composer-footer">
+              <span class="composer-hint"><span class="material-symbols-outlined icon-small">info</span> Suggestions are reviewed before they become draft details.</span>
+              <button class="btn-send"><span class="material-symbols-outlined">arrow_upward</span></button>
+            </div>
+          </div>
+        </footer>
+      </section>
+
+
+      <!-- ============================================== -->
+      <!-- STAGE 2: DE-BOXED AGREEMENT CONFIRMATION      -->
+      <!-- ============================================== -->
+      <section class="stage-view hidden" id="view-agreement">
+        <header class="main-header">
+          <div>
+            <p class="eyebrow">SAVED INSTRUCTION</p>
+            <h1>Instruction Agreement & Terms</h1>
+          </div>
+          <div class="header-actions">
+            <span class="status-pill status-draft">DRAFT</span>
+            <button class="btn-ghost text-danger">
+              <span class="material-symbols-outlined btn-icon-small">delete</span>
+              <span>Delete draft</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- The De-Boxed Single Surface Document -->
+        <article class="clean-document-sheet">
+          <!-- Document Header -->
+          <div class="sheet-top-row">
+            <div class="badge-group">
+              <span class="badge-brand"><span class="material-symbols-outlined badge-icon">contract</span> Procurement Mandate</span>
+              <span class="badge-rail"><span class="material-symbols-outlined badge-icon">verified</span> PayPal Verified Rail</span>
+            </div>
+          </div>
+
+          <h2 class="sheet-title">Scout Kisutu Branch Office Space</h2>
+          
+          <div class="sheet-directive-block">
+            <span class="directive-tag">MANDATE DIRECTIVE</span>
+            <p class="directive-text">Scout and compile commercial office listings in Kisutu, Dar es Salaam. Present shortlist of properties supporting PayPal invoice settlement. Await member review before finalizing lease commitments.</p>
+          </div>
+
+          <!-- Modern Inline Metadata Strip (DE-BOXED! No separate gray box cards!) -->
+          <div class="metadata-inline-strip">
+            <div class="meta-inline-item">
+              <span class="meta-label">Category Area</span>
+              <strong class="meta-value">Work</strong>
+            </div>
+            <div class="meta-divider"></div>
+            <div class="meta-inline-item">
+              <span class="meta-label">Target Execution Window</span>
+              <strong class="meta-value">Sunday, 1 Nov 2026 · 09:00</strong>
+            </div>
+            <div class="meta-divider"></div>
+            <div class="meta-inline-item">
+              <span class="meta-label">Spending Ceiling</span>
+              <strong class="meta-value">TZS 1,200,000.00</strong>
+            </div>
+            <div class="meta-divider"></div>
+            <div class="meta-inline-item">
+              <span class="meta-label">Timezone</span>
+              <strong class="meta-value">Africa/Dar_es_Salaam</strong>
+            </div>
+          </div>
+
+          <!-- Section: Scouted Providers (With clean selection) -->
+          <section class="sheet-section">
+            <div class="section-title-row">
+              <span class="material-symbols-outlined section-icon">storefront</span>
+              <h3>Scouted Providers & Vendor Options</h3>
+            </div>
+
+            <div class="vendor-selection-cards">
+              <div class="vendor-row selected">
+                <div class="vendor-col-info">
+                  <div class="vendor-name-line">
+                    <strong>Kisutu Commercial Centre Executive Suite</strong>
+                    <span class="rate-tag">TZS 2,500,000 / mo</span>
+                  </div>
+                  <p class="vendor-subtext">Fitted commercial suite in central Kisutu with backup power and corporate PayPal invoice facility.</p>
+                </div>
+                <div class="vendor-col-action">
+                  <span class="selected-check-badge">
+                    <span class="material-symbols-outlined icon-check">check_circle</span>
+                    <span>Selected Vendor</span>
+                  </span>
+                </div>
+              </div>
+
+              <div class="vendor-row">
+                <div class="vendor-col-info">
+                  <div class="vendor-name-line">
+                    <strong>Bakhresa / Jamhuri St Managed Office Hub</strong>
+                    <span class="rate-tag">TZS 1,800,000 / mo</span>
+                  </div>
+                  <p class="vendor-subtext">Downtown branch location adjacent to transport links, inclusive of fiber internet.</p>
+                </div>
+                <div class="vendor-col-action">
+                  <button class="btn-secondary-sm">Select Vendor</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section: Agreement Terms & Budget Linking -->
+          <section class="agreement-settlement-surface">
+            <div class="settlement-header">
+              <div class="settlement-title">
+                <span class="material-symbols-outlined settlement-icon">fact_check</span>
+                <div>
+                  <h3>Execution Agreement & Budget Allocation</h3>
+                  <small>Link an account budget and confirm agreement before activation.</small>
+                </div>
+              </div>
+              <div id="agreement-status-pill">
+                <span class="badge-pending">Pending Member Confirmation</span>
+              </div>
+            </div>
+
+            <div class="settlement-form-row">
+              <div class="form-group">
+                <label for="budget-selector">Link Account Budget Allocation</label>
+                <div class="select-wrapper">
+                  <select id="budget-selector">
+                    <option value="mortgage" selected>Houe morgage Payments (TZS 1,200,000.00)</option>
+                    <option value="household">Monthly house Hold budget (TZS 1,800,000.00)</option>
+                    <option value="conf">Arusha Developer Conference (TZS 650,000.00)</option>
+                    <option value="eyewear">Eye Wear (TZS 200,000.00)</option>
+                    <option value="assets">Website Assets (TZS 450,000.00)</option>
+                  </select>
+                  <span class="material-symbols-outlined select-chevron">expand_more</span>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Maximum Authorized Ceiling</label>
+                <div class="static-value-box">TZS 1,200,000.00</div>
+              </div>
+            </div>
+
+            <div class="settlement-action-area" id="settlement-action-container">
+              <button class="btn-primary" id="btn-confirm-agreement">
+                <span class="material-symbols-outlined btn-icon">task_alt</span>
+                <span>Confirm Agreement & Authorize</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- Sheet Action Bar (Refine / Planner) -->
+          <footer class="sheet-footer-actions">
+            <button class="btn-secondary" id="btn-refine-chat">
+              <span class="material-symbols-outlined btn-icon-small">chat</span>
+              <span>Refine in Chat</span>
+            </button>
+            <button class="btn-secondary" id="btn-view-planner">
+              <span class="material-symbols-outlined btn-icon-small">calendar_month</span>
+              <span>View in Planner</span>
+            </button>
+          </footer>
+        </article>
+      </section>
+
+
+      <!-- ============================================== -->
+      <!-- STAGE 3: ACTIVATED & LIVE EXECUTION (NEXT)     -->
+      <!-- ============================================== -->
+      <section class="stage-view hidden" id="view-activated">
+        <header class="main-header">
+          <div>
+            <p class="eyebrow">ACTIVE INSTRUCTION</p>
+            <h1>Execution Status & Schedule</h1>
+          </div>
+          <div class="header-actions">
+            <span class="status-pill status-active">
+              <span class="pulse-dot"></span>
+              <span>ACTIVE</span>
+            </span>
+            <button class="btn-secondary-sm">
+              <span class="material-symbols-outlined btn-icon-small">pause</span>
+              <span>Pause Run</span>
+            </button>
+            <button class="btn-ghost text-danger">
+              <span class="material-symbols-outlined btn-icon-small">block</span>
+              <span>Revoke</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Clean Active Execution Card -->
+        <article class="clean-document-sheet">
+          <div class="active-banner">
+            <div class="active-banner-icon">
+              <span class="material-symbols-outlined">bolt</span>
+            </div>
+            <div class="active-banner-text">
+              <strong>Instruction Activated for Automated Execution</strong>
+              <p>Appai is actively monitoring provider availability and scheduled execution under your <strong>Work</strong> budget.</p>
+            </div>
+            <button class="btn-primary" id="btn-jump-planner">
+              <span class="material-symbols-outlined btn-icon">event</span>
+              <span>Open in Planner</span>
+            </button>
+          </div>
+
+          <div class="metadata-inline-strip">
+            <div class="meta-inline-item">
+              <span class="meta-label">Selected Vendor</span>
+              <strong class="meta-value">Kisutu Commercial Centre Suite</strong>
+            </div>
+            <div class="meta-divider"></div>
+            <div class="meta-inline-item">
+              <span class="meta-label">Scheduled Run Date</span>
+              <strong class="meta-value highlight">Sunday, 1 Nov 2026 · 09:00</strong>
+            </div>
+            <div class="meta-divider"></div>
+            <div class="meta-inline-item">
+              <span class="meta-label">Allocated Budget</span>
+              <strong class="meta-value">Houe morgage Payments</strong>
+            </div>
+            <div class="meta-divider"></div>
+            <div class="meta-inline-item">
+              <span class="meta-label">Payment Rail</span>
+              <strong class="meta-value">PayPal Verified</strong>
+            </div>
+          </div>
+
+          <!-- Execution Timeline & Audit Record -->
+          <section class="sheet-section">
+            <div class="section-title-row">
+              <span class="material-symbols-outlined section-icon">history</span>
+              <h3>Execution & Lifecycle Timeline</h3>
+            </div>
+
+            <div class="timeline-list">
+              <div class="timeline-item completed">
+                <div class="timeline-marker"><span class="material-symbols-outlined">check</span></div>
+                <div class="timeline-content">
+                  <div class="timeline-header">
+                    <strong>Instruction Draft Created</strong>
+                    <span class="timeline-time">Today, 05:21 AM</span>
+                  </div>
+                  <p>Synthesized member prompt and discovered 3 PayPal-verified candidates in Kisutu.</p>
+                </div>
+              </div>
+
+              <div class="timeline-item completed">
+                <div class="timeline-marker"><span class="material-symbols-outlined">check</span></div>
+                <div class="timeline-content">
+                  <div class="timeline-header">
+                    <strong>Agreement Terms Confirmed by Member</strong>
+                    <span class="timeline-time">Today, 05:23 AM</span>
+                  </div>
+                  <p>Member selected Kisutu Commercial Centre and linked Houe morgage Payments budget (TZS 1,200,000).</p>
+                </div>
+              </div>
+
+              <div class="timeline-item completed">
+                <div class="timeline-marker"><span class="material-symbols-outlined">check</span></div>
+                <div class="timeline-content">
+                  <div class="timeline-header">
+                    <strong>Instruction Activated</strong>
+                    <span class="timeline-time">Today, 05:23 AM</span>
+                  </div>
+                  <p>Readiness checks passed. Transferred to active durable scheduler.</p>
+                </div>
+              </div>
+
+              <div class="timeline-item upcoming">
+                <div class="timeline-marker"><span class="material-symbols-outlined">schedule</span></div>
+                <div class="timeline-content">
+                  <div class="timeline-header">
+                    <strong>Scheduled Execution & Quote Verification</strong>
+                    <span class="timeline-time">Nov 1, 2026 · 09:00 AM</span>
+                  </div>
+                  <p>Local worker verifies property lease agreement and prepares electronic settlement order.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </article>
+      </section>
+
+
+      <!-- ============================================== -->
+      <!-- STAGE 4: PLANNER PROJECTION                   -->
+      <!-- ============================================== -->
+      <section class="stage-view hidden" id="view-planner">
+        <header class="main-header">
+          <div>
+            <p class="eyebrow">YOUR PRIVATE WORKSPACE</p>
+            <h1>Planner</h1>
+          </div>
+          <div class="header-actions">
+            <div class="view-toggle">
+              <button class="toggle-btn active">Day</button>
+              <button class="toggle-btn">Month</button>
+            </div>
+          </div>
+        </header>
+
+        <div class="planner-surface">
+          <div class="planner-calendar-header">
+            <div class="date-title-col">
+              <h2>Sunday, 1 November 2026</h2>
+              <span class="date-subtitle">Scheduled Obligations & Procurement Timeline</span>
+            </div>
+            <div class="date-nav-controls">
+              <button class="btn-icon-nav"><span class="material-symbols-outlined">chevron_left</span></button>
+              <button class="btn-secondary-sm">Today</button>
+              <button class="btn-icon-nav"><span class="material-symbols-outlined">chevron_right</span></button>
+            </div>
+          </div>
+
+          <div class="planner-agenda-card">
+            <div class="agenda-time-column">
+              <span class="agenda-time">09:00 AM</span>
+            </div>
+            <div class="agenda-content-column">
+              <div class="agenda-top">
+                <div class="agenda-title-line">
+                  <strong>Scout Kisutu Branch Office Space</strong>
+                  <span class="badge-rail-sm">PayPal Verified</span>
+                  <span class="status-pill status-active-sm">ACTIVE</span>
+                </div>
+                <span class="agenda-budget-amount">TZS 1,200,000.00</span>
+              </div>
+              <p class="agenda-subtext">Selected: Kisutu Commercial Centre Executive Suite · Linked to Houe morgage Payments allocation</p>
+              <div class="agenda-actions">
+                <button class="btn-secondary-xs" id="btn-planner-return-instruction">
+                  <span class="material-symbols-outlined btn-icon-xs">visibility</span>
+                  <span>View Instruction Details</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="planner-empty-slot">
+            <span class="material-symbols-outlined slot-icon">add_circle_outline</span>
+            <span>No additional runs scheduled for the remainder of the day.</span>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -194,7 +194,7 @@ async function main() {
     }
     assert.ok(limited, 'repeated sign-in attempts must be rate limited');
 
-    const componentSource = await readSource(join(root, '..', 'src', 'app', 'app.component.ts'), 'utf8');
+    const componentSource = await readSource(join(root, '..', 'src', 'App.tsx'), 'utf8');
     assert.doesNotMatch(componentSource, /localStorage|sessionStorage/, 'browser code must not persist credentials or session tokens');
     const memberSources = componentSource + await readSource(join(root, '..', 'apps', 'api', 'src', 'auth.ts'), 'utf8') + await readSource(join(root, '..', 'apps', 'api', 'src', 'server.ts'), 'utf8');
     assert.doesNotMatch(memberSources, /openai|anthropic|model context|system prompt/i, 'member auth/profile path must not forward member credentials or profile data to a model');

@@ -254,6 +254,59 @@ async function main() {
       { supplierId: ownerSupplierTwoId, rank: 1 }, { supplierId: ownerSupplierOneId, rank: 2 },
     ], 'rejected cross-member changes leave the owner rankings unchanged');
 
+    // Private supplier PATCH, stale version conflict, cross-member denial, and DELETE cascade (M1-H, AC-14)
+    const patchPayload = {
+      name: `Owner supplier one updated ${suffix}`,
+      categories: ['PRODUCT'],
+      serviceAreas: ['Arusha', 'Moshi Urban'],
+      privateNotes: 'Updated owner-only note with revised terms',
+    };
+    const patchResult = await request(`/api/v1/member-suppliers/${ownerSupplierOneId}`, {
+      method: 'PATCH', cookie: owner.cookie, headers: { 'If-Match': '"1"' }, body: patchPayload,
+    });
+    assert.equal(patchResult.response.status, 200, `supplier update: ${JSON.stringify(patchResult.json)}`);
+    assert.equal(Number(patchResult.json.supplier.version), 2, 'supplier update increments version');
+    assert.equal(patchResult.json.supplier.name, patchPayload.name);
+    assert.deepEqual(patchResult.json.supplier.serviceAreas, patchPayload.serviceAreas);
+    assert.equal(patchResult.json.supplier.privateNotes, patchPayload.privateNotes);
+
+    const stalePatchResult = await request(`/api/v1/member-suppliers/${ownerSupplierOneId}`, {
+      method: 'PATCH', cookie: owner.cookie, headers: { 'If-Match': '"1"' }, body: patchPayload,
+    });
+    assert.equal(stalePatchResult.response.status, 412, 'stale supplier version rejected');
+    assert.equal(stalePatchResult.json.code, 'VERSION_CONFLICT');
+
+    const crossMemberPatch = await request(`/api/v1/member-suppliers/${ownerSupplierOneId}`, {
+      method: 'PATCH', cookie: other.cookie, headers: { 'If-Match': '"2"' }, body: patchPayload,
+    });
+    assert.equal(crossMemberPatch.response.status, 404, 'cross-member supplier update denied');
+
+    const crossMemberDelete = await request(`/api/v1/member-suppliers/${ownerSupplierOneId}`, {
+      method: 'DELETE', cookie: other.cookie, headers: { 'If-Match': '"2"' },
+    });
+    assert.equal(crossMemberDelete.response.status, 404, 'cross-member supplier delete denied');
+
+    const ownerSupplierThree = await createPrivateSupplier(owner.cookie, {
+      name: `Owner supplier three to delete ${suffix}`, categories: ['PRODUCT'], serviceAreas: ['Kilimanjaro'], privateNotes: 'Will be deleted',
+    });
+    const ownerSupplierThreeId = ownerSupplierThree.json.supplier.id;
+    await savePreferences(owner.cookie, [ownerSupplierTwoId, ownerSupplierOneId, ownerSupplierThreeId]);
+    const budgetBeforeDelete = (await request('/api/v1/budgets', { cookie: owner.cookie })).json.budgets.find((b) => b.id === budgetId);
+    assert.equal(budgetBeforeDelete.preferredSuppliers.length, 3, 'three preferred suppliers before cascade delete');
+
+    const deleteResult = await request(`/api/v1/member-suppliers/${ownerSupplierThreeId}`, {
+      method: 'DELETE', cookie: owner.cookie, headers: { 'If-Match': '"1"' },
+    });
+    assert.equal(deleteResult.response.status, 204, 'supplier delete succeeds');
+
+    const budgetAfterDelete = (await request('/api/v1/budgets', { cookie: owner.cookie })).json.budgets.find((b) => b.id === budgetId);
+    assert.deepEqual(budgetAfterDelete.preferredSuppliers, [
+      { supplierId: ownerSupplierTwoId, rank: 1 }, { supplierId: ownerSupplierOneId, rank: 2 },
+    ], 'deleting a private supplier cascades to remove its budget preference ranking');
+
+    const listAfterDelete = await request('/api/v1/suppliers', { cookie: owner.cookie });
+    assert.equal(listAfterDelete.json.mySuppliers.some((s) => s.id === ownerSupplierThreeId), false, 'deleted supplier is no longer listed');
+
     result = await request('/api/v1/instructions', {
       method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() },
       body: { description: 'Cross-owner budget must be rejected', kind: 'ONE_TIME', category: 'PRODUCT', mode: 'REVIEW_REQUIRED', budgetId: otherBudgetId },

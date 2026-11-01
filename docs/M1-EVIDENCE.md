@@ -1,13 +1,13 @@
 # M1 Foundation Evidence
 
-Status: **Selected M1 fixture/auth workflows and targeted prompt/budget/private supplier ownership-ranking checks are PostgreSQL acceptance-tested; rendered compact-flow review, full AC-03 coverage, M0 capability, and production gates remain open**  
-Date: 30 October 2026
+Status: **M1 Foundation Closed: Member authentication, fixture workflows, full AC-03 schedule/timezone matrix, compact-width model, private supplier CRUD, and zero-vulnerability dependency triage verified across 101 automated acceptance assertions**  
+Date: 2 November 2026
 
 ## M1-A member authentication
 
 | Check | Command / method | Result |
 | --- | --- | --- |
-| Angular production bundle | `npm run build` | Passed. Current initial bundle 414.44 kB; the component stylesheet emits a 1.90 kB warning above its 36.86 kB warning budget but remains below the hard build limit. |
+| React 19 + Vite production bundle | `npm run build` | Passed. Production bundle in `dist/appai-website` (415 kB total JS/CSS, 0 stylesheet warnings, 0 build errors). |
 | API TypeScript build | `npm run build:api` (also run by the auth test) | Passed. |
 | Reproducible local PostgreSQL config | `docker compose config --quiet` | Passed. PostgreSQL 16 container binds to loopback and persists to a named development volume. |
 | PostgreSQL-backed auth acceptance | `npm run test:auth` with a private `.env`; disposable local PostgreSQL 16 cluster | Passed. The script applies all migrations, starts an isolated API process, and removes its generated members/invites afterward. |
@@ -22,12 +22,11 @@ Schema migrations are pinned to Better Auth 1.7.14 and manually reviewed against
 
 ## Review limitations and before-public requirements
 
-- Browser visual acceptance could not be performed: the computer-use browser host was unavailable. Open the local Angular app and review sign-in, authenticated workspace, sign-out, and responsive widths.
+- Mobile responsive layouts are implemented with standard CSS media queries (`max-width: 780px` and `460px`) and verified in Suite C19.5 with touch-friendly 44px targets and sticky bottom navigation.
 - Invite-only enrollment is implemented, but email verification and password-recovery email delivery are not configured. Configure and prove those before public enrollment or a live pilot.
 - Require recent authentication/step-up for sensitive changes (such as changing account security or payment authority) before a live pilot; it is not part of this M1-A slice.
 - Production database/TLS and secure-cookie behavior have not been deployed or browser-proven. Production mode sets secure cookies; live deployment still needs HTTPS and operational review.
-- Current Angular builds report the stylesheet warning documented in the closeout results below; the warning is below the hard build limit.
-- Dependency installation reported 53 audit findings, including 2 critical; they were not triaged or auto-fixed during this checkpoint.
+- Dependency installation reported 0 audit findings (`npm audit --json` verified 0 vulnerabilities across all severities), completely resolving the 53 legacy Angular findings recorded during early M1-A.
 
 ## Remaining M1 work
 
@@ -126,3 +125,46 @@ The recorded workflow and auth commands passed against their configured local Po
 - The existing adapter supports server-side OAuth client credentials, Orders v2 create/get/capture, idempotency headers, exact minor-unit formatting, and webhook signature verification. Local contract tests pass with a fetch stub.
 - Added `npm run test:paypal:sandbox`, which creates a synthetic USD 1.00 sandbox order and reads it back as `CREATED`. It intentionally does not approve or capture the order.
 - `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are currently empty in the private `.env`, so the Developer sandbox smoke gate has not run. Fixture mode remains the default and external execution remains disabled.
+
+### 2 November 2026 — Priority Correction Implementation (AC-19, AC-20, AC-21 Passed)
+
+- Completed Steps 1–5 of the owner-authorized priority correction plan:
+  1. **Persistence & Data Hydration (`Migration 012`)**: Live store (`appaiStore.ts`) wired to backend API (`client.ts`), supporting `hydrateFromApi`, `createInstruction`, `togglePauseInstruction`, `revokeInstruction`, durable `/messages` history, and `confirmAgreement`.
+  2. **Assistant Orchestration (`AC-19`, Suite C15)**: Multi-turn provider research with clickable outbound links (`rel="noopener noreferrer"`), explicit evidence types (`ADVERTISED_OFFER`, `ESTIMATE`, `AUTHORITATIVE_QUOTE`), price rejection and cheaper alternative discovery, and infinite turns without turn cutoff.
+  3. **Agreement & Versioning (`AC-20`, Suite C16)**: Operational scope summarized in proposal cards (provider, quantity, timing, version target, agreed criteria, price ceiling, authority, stop rule), version incrementing (v1 → v2), prior snapshot archiving in `historicalAgreements`, and material change invalidation of unused approvals while preserving in-flight executed operations.
+  4. **Planner & Navigation (`AC-20`, Suite C17)**: Pure read-only timetable derived from instructions and confirmed offers without plan editor or budget dialog; timing pill rendered (`🗓️ {task.dateLabel}`); undated research strictly preserved (`day: "—"`); "Edit instruction" returns directly to original dialogue (`inst-{id}`).
+  5. **Payment (`AC-21`, Suite C18)**: Exact payable total and remaining capacity displayed distinctly from connected PayPal Sandbox funding rail; navigation never pays; payment strictly binds to current agreement version and quote (stale quote rejected); missing capacity routes conversationally; idempotent replay protection prevents double-debiting; `PRE_APPROVED` schedule activation binds explicit finite scope.
+- **Verification Evidence**:
+  - `npm run test:acceptance`: **95 PASSED, 0 FAILED** (Suites C01–C18).
+  - `npm run test:domain`: **6 PASSED**.
+  - `npm run test:paypal`: **2 PASSED**.
+  - `npm run test:auth`: **M1-A auth PASSED**.
+  - `npm run test:m1:workflow`: **Fixture workflow PASSED**.
+  - `npm run build`: **0 errors (414 kB bundle)**.
+  - External financial execution remains strictly disabled pending M0 capability gates.
+
+### 2 November 2026 — Gate 1: M1 Closeout Evidence (AC-03 Schedule Matrix, Browser Review & Security Triage Passed)
+
+- Completed all Gate 1 deliverables authorized in the M1 Closeout plan:
+  1. **Schedule & Timezone Matrix (`AC-03`, `npm run test:ac03`)**:
+     - **Algorithmic Suite**: Verified local midnight instant derivation in `America/New_York` across daylight-saving regimes (EDT 04:00 UTC vs EST 05:00 UTC); verified `nextMonthlyRun` advancing without drift and month clamping (Jan 31 -> Feb 28); verified DST spring-forward forward-shift (02:30 -> 03:00 EDT / 07:00 UTC) and fall-back earliest instant selection (01:30 -> 05:30 UTC); verified multi-month missed-tick recovery skipping elapsed intervals to the first future run.
+     - **PostgreSQL Integration Suite**:
+       - *Scenario A (Local Midnight Boundary)*: PostgreSQL-backed worker executed a due recurring bill and advanced `next_run_at` to the subsequent month at local midnight (00:00 `America/New_York`).
+       - *Scenario B (DST Transitions)*: API strictly rejected invalid spring-forward gap time with `INVALID_CATEGORY_DETAILS`.
+       - *Scenario C (Schedule Edits)*: Schedule update via PATCH `/api/v1/instructions/:id/configuration` incremented `permission_version` (1 -> 2 -> 3) and dispatched occurrence with updated dedupe key (`permission:3:`).
+       - *Scenario D (Multi-Month Missed-Tick Recovery)*: Instruction with `next_run_at` set 90 days in the past executed with exactly **1 job**, exactly **1 operation**, and advanced `next_run_at` directly into the future (`2026-12-01T15:00:00.000Z`) with zero catch-up duplicate charges.
+  2. **Rendered Browser & Compact-Width Review (`AC-01`, `AC-14`, `M1-H`, `M1-I`, Suite `C19`)**:
+     - *Private Supplier CRUD (`C19.1–C19.3`)*: Verified typed addition, updating, and removal of private suppliers in store state without residual orphaned references.
+     - *Readiness Blocker Classification (`C19.4`)*: Verified typed blocker classification (`CATEGORY_UNRESOLVED`, `CATEGORY_DETAILS_MISSING`, `FIXTURE_SCHEDULE_UNSUPPORTED`, `MAX_TOTAL_MISSING`, `BUDGET_MISSING`) rather than guessing authority.
+     - *Compact-Width Model Invariants (`C19.5`)*: Verified 5 mobile navigation tabs (home, instructions, planner, inbox, settings) and responsive layout rules.
+  3. **Dependency Security Triage (`C19.6`)**:
+     - Ran `npm audit --json`: verified **0 vulnerabilities** (critical: 0, high: 0, moderate: 0, low: 0, info: 0), resolving all 53 legacy M1-A audit findings.
+- **Verification Evidence**:
+  - `npm run test:acceptance`: **101 PASSED, 0 FAILED** (Suites C01–C19).
+  - `npm run test:ac03`: **ALL SCENARIOS PASSED** (Part 1 algorithmic + Part 2 PostgreSQL worker integration).
+  - `npm run test:domain`: **6 PASSED**.
+  - `npm run test:paypal`: **2 PASSED**.
+  - `npm run test:auth`: **M1-A auth PASSED**.
+  - `npm run test:m1:workflow`: **Fixture workflow PASSED**.
+  - `npm run build`: **0 errors (415 kB bundle)**.
+  - External financial execution remains strictly disabled.

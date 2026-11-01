@@ -1,15 +1,17 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/app/` contains the Angular standalone shell and page template; `src/styles.scss` holds global styling.
-- `src/index.html` and `angular.json` define the browser entry point and build configuration.
+- `src/` contains the React 19 + Vite web application: `src/App.tsx` (top-level routing & views), `src/components/` (screens & shared UI), `src/store/` (transactional state engine `domainCore.ts` and React hook adapter), and `src/types/` (canonical domain models).
+- `index.html` and `vite.config.ts` define the browser entry point and build configuration, emitting production assets to `dist/appai-website`.
+- `tests/acceptance-matrix.ts` holds the comprehensive 66-point automated verification suite.
 - Start with `docs/README.md`, which links the current v1.1 PRD, technical requirements, schema, implementation plan, flows, and acceptance matrix.
 - Preserve `docs/archive/v1.0/` as historical reference. The existing flow PDF is also v1.0; use the current Markdown flow.
 - `apps/api/` contains the fixture/sandbox demo API; `apps/worker/`, `packages/persistence/`, and durable provider execution remain separate implementation boundaries.
 
 ## Build, Test, and Development Commands
-- Use npm with the pinned Angular toolchain in `package.json`.
-- `npm install` installs dependencies; `npm start` serves the Angular site locally; `npm run build` creates the production bundle in `dist/appai-website`.
+- Use npm with the Vite + React toolchain in `package.json`.
+- `npm install` installs dependencies; `npm run dev` serves the React site locally on port 4201 with hot reload; `npm run build` creates the production bundle in `dist/appai-website`.
+- `npm run test:acceptance` executes the 66-assertion automated domain and UI lifecycle verification suite.
 - `npm run build:domain` compiles the TypeScript domain package; `npm run test:domain` runs its focused Node tests.
 - `npm run build:api` compiles the sandbox-only demo API; `npm run demo:api` starts it in fixture mode by default. Set `PAYPAL_DEMO_MODE=sandbox` only with secure PayPal Developer sandbox credentials.
 - `npm run test:paypal` checks exact amount formatting and the OAuth/Orders v2 request contract with a local fetch stub.
@@ -19,7 +21,7 @@
 ## Coding Style & Naming Conventions
 - Follow existing Markdown: descriptive headings, concise lists, relative links, and tables for contracts or acceptance scenarios.
 - Preserve established filenames and identifiers such as `FR-06`, `AC-08`, and `PRE_APPROVED`.
-- Use standalone Angular components, TypeScript strict mode, semantic HTML, and the existing ThemeUI-style unprefixed design tokens. Keep product behavior out of page-only presentation code.
+- Use React 19 functional components, Tailwind CSS v4, TypeScript strict mode, semantic HTML, and the canonical domain contracts in `src/types/appai.ts`. Keep product behavior out of page-only presentation code.
 
 ## Testing Guidelines
 - Follow `docs/DEVELOPMENT-ACCEPTANCE.md`; its scenarios are requirements, not passed tests.

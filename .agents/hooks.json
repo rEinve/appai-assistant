@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|write_file|replace_file_content|read_file",
+        "command": "python3 .agents/scripts/gate.py"
+      }
+    ]
+  }
+}

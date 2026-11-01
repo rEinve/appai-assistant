@@ -1,7 +1,7 @@
 # A-P-P-A-I implementation plan and coding handoff
 
-Version: **1.1** · status reviewed 30 October 2026  
-Status: M1 local fixture subset is PostgreSQL acceptance-tested; prompt/budget/supplier journeys and the full AC-03 schedule matrix remain unaccepted. M0 external access is not proven; payment execution stays disabled until its gate passes.  
+Version: **1.1** · status reviewed 2 November 2026  
+Status: M1 durable instruction and job foundation closeout passed on 2 November 2026 (AC-01, AC-03 schedule matrix, AC-14 M1 ownership, AC-18, AC-19–21). Active schedule fencing, private supplier CRUD/preference cascade, and fulfillment counters are verified. M0 external access is not proven; payment execution stays disabled until its gate passes.  
 Read with [PRD](A-P-P-A-I-agent-product-requirements-document.md), [technical requirements](A-P-P-A-I-agent-technical-requirements-document.md), [schema](A-P-P-A-I-agent-schema.md), [flows](A-P-P-A-I-agent-user-flow-chat.md) and [acceptance](DEVELOPMENT-ACCEPTANCE.md).
 
 ## Priority correction — owner-authorized 1 November 2026
@@ -65,7 +65,7 @@ Stop/redirection condition: no supported purchasing arrangement for the intended
 
 ### M1 — Durable instruction and job foundation
 
-Progress: M1 local fixture workflow is implemented; `npm run test:m1:workflow` exercises owner-scoped fixture activation, lifecycle transitions, synthetic immutable quotes, review decisions, one UTC monthly recurrence, notify-only observations, expired-lease recovery, prompt/budget bounds and private supplier ownership/ranking without vendor/payment calls. Members can now edit and remove private suppliers through owner-scoped versioned operations; that CRUD still needs acceptance. Budget-ranking controls are deferred from the Account UI until discovery makes them useful. The missed-tick correction also needs AC-03 coverage. See [work status](WORK-STATUS.md) for the ordered closeout queue.
+Progress: M1 local fixture workflow is complete and hardened; `npm run test:m1:workflow` exercises owner-scoped fixture activation, lifecycle transitions, synthetic immutable quotes, review decisions, UTC monthly recurrence, notify-only observations, expired-lease recovery, prompt/budget bounds, private supplier CRUD (`PATCH`/`DELETE` with version conflict and preference cascade), and fulfillment counter advancement without vendor/payment calls. `npm run test:ac03` verifies the full schedule and timezone matrix, including active/paused schedule amendments, job fencing (`INSTRUCTION_SCHEDULE_UPDATED`), approval invalidation, DST transitions, and missed-tick recovery. See [work status](WORK-STATUS.md) and [M1 evidence](M1-EVIDENCE.md) for full records.
 
 Work:
 - Scaffold application/worker/database and document reproducible local startup.
@@ -111,13 +111,13 @@ Allow members to set a positive maximum total in the account currency, an option
 
 Run a separate PostgreSQL worker in local development. Scan due fixture instructions into deduplicated jobs; claim with `SKIP LOCKED`, bounded batches, expiring leases and monotonically increasing lease generations. Retry failures with bounded backoff. Persist unique occurrence/obligation/operation identities, immutable synthetic quotes and audit/outbox records transactionally. REVIEW_REQUIRED creates a quote-bound fixture decision; PRE_APPROVED records a fixture simulation only. Monthly bill schedules and notify-only watch observations are deterministic fixtures. The M1 workflow acceptance script verifies restart/replay and ownership. No vendor/payment request is permitted.
 
-For a recurring bill that is overdue after downtime, queue its current occurrence once and advance `next_run_at` directly to the first future local monthly schedule. Do not enqueue each elapsed monthly tick. The real adapter must still resolve the current unpaid obligation before any external action; the fixture schedule is not evidence of that capability. AC-03 timezone transitions, schedule edits and missed-tick recovery require acceptance coverage.
+For a recurring bill that is overdue after downtime, queue its current occurrence once and advance `next_run_at` directly to the first future local monthly schedule. Do not enqueue each elapsed monthly tick. The real adapter must still resolve the current unpaid obligation before any external action; the fixture schedule is not evidence of that capability. AC-03 timezone transitions, schedule edits, job fencing, and missed-tick recovery have passed acceptance coverage.
 
 #### M1-H — Prompt-first instruction and budget inheritance (owner-confirmed 30 October 2026)
 
 Preserve the member's exact plain-language need as the instruction source. Remove the requirement to fill Appai-authored category forms before saving a draft. Link the instruction to an owned budget that supplies currency, hard maximum, optional date limits and preferred suppliers. An instruction may narrow a date window or lower the maximum, never exceed the budget; there is no minimum purchase amount. Keep extracted constraints separate, visible and correctable; ask only for consequential missing details. Add budget dates and supplier preferences with owner-enforced constraints. Do not claim live assistant parsing unless a supported model/service is selected and configured.
 
-M1-H local exit, **still open**: the PostgreSQL workflow now verifies exact prompt create/edit/reload, budget inheritance/bounds, stale-version and retry behavior, cross-member instruction/budget access, private supplier isolation, and owner-bound ranked budget preferences. The member flow still needs rendered compact-width review and explicit acceptance of how unresolved consequential details are shown. Supplier discovery and real purchasing remain outside this slice.
+M1-H local exit, **passed**: the PostgreSQL workflow verifies exact prompt create/edit/reload, budget inheritance/bounds, stale-version and retry behavior, cross-member instruction/budget access, private supplier isolation and CRUD/preference cascade, and owner-bound ranked budget preferences. Rendered compact-width review and unresolved detail display are verified. Supplier discovery and real purchasing remain outside this slice.
 
 **Owner direction, 30 October 2026:** private suppliers are editable/removable from Account, including their service categories and areas. Keep budget-level supplier ranking controls out of the current UI until an active discovery/price-comparison flow makes them useful. Preserve private ownership and audit/version rules for supplier changes.
 

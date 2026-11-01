@@ -14,19 +14,62 @@ export interface CreatePayPalOrderInput {
   amountMinor: string;
   description: string;
   reference: string;
+  payee?: {
+    merchantId?: string;
+    emailAddress?: string;
+  };
 }
 
 export interface PayPalOrderResult {
   id: string;
   status: string;
   approvalUrl?: string;
+  roles?: {
+    buyerRole: string;
+    callerRole: string;
+    payeeRole: string;
+  };
   raw: unknown;
 }
+
+export const PAYPAL_M0_CAPABILITY = {
+  adapterKey: 'paypal-sandbox',
+  adapterVersion: '2.0.0',
+  paymentRail: 'PAYPAL',
+  buyerRole: 'AUTHENTICATED_MEMBER_PAYPAL_BUYER',
+  callerRole: 'APPAI_OAUTH_CLIENT_CREDENTIALS',
+  payeeRole: 'VERIFIED_SANDBOX_MERCHANT',
+  reviewExecutionSupported: true,
+  unattendedExecutionSupported: false,
+  statusLookupSupported: true,
+  webhookVerificationSupported: true,
+  reservationSupported: false,
+  deferredHoldCaptureSupported: false,
+  biddingSupported: false,
+} as const;
 
 export class PayPalConfigurationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PayPalConfigurationError';
+  }
+}
+
+export class PayPalUnsupportedCapabilityError extends Error {
+  public readonly code = 'CAPABILITY_UNSUPPORTED';
+  constructor(public readonly operation: string, message: string) {
+    super(message);
+    this.name = 'PayPalUnsupportedCapabilityError';
+  }
+}
+
+export function assertPayPalOperationSupported(operation: string): void {
+  const unsupported = new Set(['HOLD', 'AUTHORIZE', 'CAPTURE_HOLD', 'VOID_HOLD', 'DEPOSIT', 'BID', 'ESCROW']);
+  if (unsupported.has(operation.toUpperCase())) {
+    throw new PayPalUnsupportedCapabilityError(
+      operation,
+      `MVP cannot invoke unimplemented ${operation} workflow; reservation and deferred hold/capture are disabled (AC-17).`,
+    );
   }
 }
 
@@ -91,22 +134,65 @@ export class PayPalSandboxClient {
   }
 
   async createOrder(input: CreatePayPalOrderInput): Promise<PayPalOrderResult> {
+    assertPayPalOperationSupported('CREATE_ORDER');
+    const payeeUnit = input.payee && (input.payee.merchantId || input.payee.emailAddress)
+      ? { payee: { ...(input.payee.merchantId ? { merchant_id: input.payee.merchantId } : {}), ...(input.payee.emailAddress ? { email_address: input.payee.emailAddress } : {}) } }
+      : {};
     const body = await this.request<{ id: string; status: string; links?: Array<{ rel: string; href: string }> }>('/v2/checkout/orders', {
       method: 'POST',
       headers: { 'PayPal-Request-Id': input.operationId },
-      body: JSON.stringify({ intent: 'CAPTURE', purchase_units: [{ reference_id: input.reference, custom_id: input.operationId, description: input.description, amount: { currency_code: this.config.currency, value: formatMinorUnits(input.amountMinor, this.config.currencyScale) } }] }),
+      body: JSON.stringify({
+        intent: 'CAPTURE',
+        purchase_units: [{
+          reference_id: input.reference,
+          custom_id: input.operationId,
+          description: input.description,
+          amount: { currency_code: this.config.currency, value: formatMinorUnits(input.amountMinor, this.config.currencyScale) },
+          ...payeeUnit,
+        }],
+      }),
     });
-    return { id: body.id, status: body.status, approvalUrl: body.links?.find((link) => link.rel === 'approve')?.href, raw: body };
+    return {
+      id: body.id,
+      status: body.status,
+      approvalUrl: body.links?.find((link) => link.rel === 'approve')?.href,
+      roles: {
+        buyerRole: PAYPAL_M0_CAPABILITY.buyerRole,
+        callerRole: PAYPAL_M0_CAPABILITY.callerRole,
+        payeeRole: PAYPAL_M0_CAPABILITY.payeeRole,
+      },
+      raw: body,
+    };
   }
 
   async captureOrder(orderId: string, operationId: string): Promise<PayPalOrderResult> {
+    assertPayPalOperationSupported('CAPTURE_ORDER');
     const body = await this.request<{ id: string; status: string }>('/v2/checkout/orders/' + encodeURIComponent(orderId) + '/capture', { method: 'POST', headers: { 'PayPal-Request-Id': operationId }, body: JSON.stringify({}) });
-    return { id: body.id, status: body.status, raw: body };
+    return {
+      id: body.id,
+      status: body.status,
+      roles: {
+        buyerRole: PAYPAL_M0_CAPABILITY.buyerRole,
+        callerRole: PAYPAL_M0_CAPABILITY.callerRole,
+        payeeRole: PAYPAL_M0_CAPABILITY.payeeRole,
+      },
+      raw: body,
+    };
   }
 
   async getOrder(orderId: string): Promise<PayPalOrderResult> {
+    assertPayPalOperationSupported('GET_ORDER');
     const body = await this.request<{ id: string; status: string }>('/v2/checkout/orders/' + encodeURIComponent(orderId));
-    return { id: body.id, status: body.status, raw: body };
+    return {
+      id: body.id,
+      status: body.status,
+      roles: {
+        buyerRole: PAYPAL_M0_CAPABILITY.buyerRole,
+        callerRole: PAYPAL_M0_CAPABILITY.callerRole,
+        payeeRole: PAYPAL_M0_CAPABILITY.payeeRole,
+      },
+      raw: body,
+    };
   }
 
   async verifyWebhook(headers: { transmissionId: string; transmissionTime: string; certUrl: string; authAlgo: string; transmissionSig: string }, event: unknown): Promise<boolean> {

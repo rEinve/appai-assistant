@@ -37,7 +37,7 @@ function errorCode(error: unknown): string {
   return 'WORKER_PROCESSING_ERROR';
 }
 
-function localParts(date: Date, timezone: string): { year: number; month: number; day: number; hour: number; minute: number; second: number } {
+export function localParts(date: Date, timezone: string): { year: number; month: number; day: number; hour: number; minute: number; second: number } {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en', {
     timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
@@ -45,7 +45,7 @@ function localParts(date: Date, timezone: string): { year: number; month: number
   return { year: parts['year'], month: parts['month'], day: parts['day'], hour: parts['hour'], minute: parts['minute'], second: parts['second'] };
 }
 
-function localDateTimeToInstant(value: string, timezone: string): Date | null {
+export function localDateTimeToInstant(value: string, timezone: string): Date | null {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
   if (!match) return null;
   let wallMs = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]));
@@ -72,12 +72,12 @@ function localDateTimeToInstant(value: string, timezone: string): Date | null {
   return null;
 }
 
-function nextMonthlyRun(dueAt: Date, after: Date, config: Record<string, unknown>, timezone: string): Date | null {
+export function nextMonthlyRun(dueAt: Date, after: Date, config: Record<string, unknown>, timezone: string): Date | null {
   if (config['frequency'] !== 'MONTHLY' || !Number.isInteger(config['dayOfMonth'])
       || Number(config['dayOfMonth']) < 1 || Number(config['dayOfMonth']) > 31
       || typeof config['localTime'] !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(config['localTime'])) return null;
   const current = localParts(dueAt, timezone);
-  const firstMonthIndex = current.year * 12 + current.month;
+  const firstMonthIndex = current.year * 12 + (current.month - 1);
   for (let monthOffset = 1; monthOffset <= 1200; monthOffset += 1) {
     const monthIndex = firstMonthIndex + monthOffset;
     const year = Math.floor(monthIndex / 12);
@@ -155,9 +155,9 @@ async function enqueueDueInstructions(): Promise<number> {
         if (next && (!instruction.validUntil || next <= instruction.validUntil)) nextRunAt = next;
       }
       await db.query(
-        `UPDATE procurement_instructions SET next_run_at = $5, updated_at = now()
-         WHERE id = $1 AND owner_id = $2 AND state = 'ACTIVE' AND permission_version = $3 AND next_run_at = $4`,
-        [instruction.id, instruction.owner_id, instruction.permissionVersion, instruction.nextRunAt, nextRunAt],
+        `UPDATE procurement_instructions SET next_run_at = $4, updated_at = now()
+         WHERE id = $1 AND owner_id = $2 AND state = 'ACTIVE' AND permission_version = $3`,
+        [instruction.id, instruction.owner_id, instruction.permissionVersion, nextRunAt],
       );
       if (job.rows[0]) {
         created += 1;
@@ -299,13 +299,16 @@ async function processOccurrence(job: DurableJob): Promise<void> {
       validFrom: Date | null; validUntil: Date | null; completionLimit: number | null;
       fulfilledCount: number; maximum: string | null; currency: string | null;
       permissionVersion: number | string; categoryDetails: Record<string, unknown> | null;
+      fundingMandateId: string | null; vendorAccountId: string | null;
     }>(
       `SELECT category, kind, mode, state, execution_environment AS environment,
               valid_from AS "validFrom", valid_until AS "validUntil",
               completion_limit AS "completionLimit", fulfilled_count AS "fulfilledCount",
               max_total_minor::text AS maximum, currency,
               permission_version AS "permissionVersion",
-              structured_constraints->'categoryDetails' AS "categoryDetails"
+              structured_constraints->'categoryDetails' AS "categoryDetails",
+              funding_mandate_id AS "fundingMandateId",
+              vendor_account_id AS "vendorAccountId"
        FROM procurement_instructions WHERE id = $1 AND owner_id = $2 FOR UPDATE`,
       [instructionId, job.owner_id],
     );
@@ -316,6 +319,25 @@ async function processOccurrence(job: DurableJob): Promise<void> {
     };
     if (!instruction) return block('INSTRUCTION_NOT_FOUND');
     if (instruction.state !== 'ACTIVE' || instruction.environment !== 'FIXTURE') return block('INSTRUCTION_NOT_ACTIVE_FIXTURE');
+    if (Number(instruction.permissionVersion) !== Number(scheduleVersion)) return block('STALE_SCHEDULE_VERSION');
+    if (instruction.vendorAccountId) {
+      const accountRes = await db.query<{ sessionStatus: string }>(
+        'SELECT session_status AS "sessionStatus" FROM vendor_accounts WHERE id = $1 AND owner_id = $2',
+        [instruction.vendorAccountId, job.owner_id],
+      );
+      const sessionStatus = accountRes.rows[0]?.sessionStatus;
+      if (!sessionStatus || sessionStatus === 'EXPIRED' || sessionStatus === 'REAUTH_REQUIRED') return block('REAUTH_REQUIRED');
+      if (sessionStatus === 'REVOKED') return block('MANDATE_REVOKED');
+    }
+    if (instruction.fundingMandateId) {
+      const mandateRes = await db.query<{ status: string }>(
+        'SELECT status FROM funding_mandates WHERE id = $1 AND owner_id = $2',
+        [instruction.fundingMandateId, job.owner_id],
+      );
+      const mandateStatus = mandateRes.rows[0]?.status;
+      if (!mandateStatus || mandateStatus === 'REVOKED' || mandateStatus === 'EXPIRED') return block('MANDATE_REVOKED');
+      if (mandateStatus === 'REAUTH_REQUIRED') return block('REAUTH_REQUIRED');
+    }
     const dueAt = new Date(dueAtValue);
     if ((instruction.validFrom && dueAt < instruction.validFrom) || (instruction.validUntil && dueAt > instruction.validUntil)) return block('OUTSIDE_VALIDITY_WINDOW');
     if (instruction.completionLimit !== null && instruction.fulfilledCount >= instruction.completionLimit) return block('COMPLETION_LIMIT_REACHED');
@@ -397,6 +419,18 @@ async function processOccurrence(job: DurableJob): Promise<void> {
          WHERE id = $1 AND owner_id = $2`,
         [operationRow.id, job.owner_id, quoteId, operationState],
       );
+      if (instruction.mode === 'PRE_APPROVED') {
+        await db.query(
+          `UPDATE procurement_instructions
+           SET fulfilled_count = CASE
+                 WHEN completion_limit IS NOT NULL THEN LEAST(completion_limit, fulfilled_count + 1)
+                 ELSE fulfilled_count + 1
+               END,
+               updated_at = now()
+           WHERE id = $1 AND owner_id = $2`,
+          [instructionId, job.owner_id],
+        );
+      }
       if (instruction.mode === 'REVIEW_REQUIRED') {
         const approvalExpiry = await db.query<{ expires_at: Date }>(
           `INSERT INTO approvals (owner_id, operation_id, quote_id, quote_hash, permission_version, status, expires_at)
@@ -439,6 +473,7 @@ async function processObservation(job: DurableJob): Promise<void> {
   const instructionId = job.instruction_id;
   const occurrenceKey = job.payload['occurrenceKey'];
   const dueAtValue = job.payload['dueAt'];
+  const scheduleVersion = job.payload['scheduleVersion'];
   if (!instructionId || typeof occurrenceKey !== 'string' || typeof dueAtValue !== 'string' || !Number.isFinite(Date.parse(dueAtValue))) {
     await blockJob(job, 'INVALID_OBSERVATION_PAYLOAD');
     return;
@@ -447,10 +482,15 @@ async function processObservation(job: DurableJob): Promise<void> {
     const instructionResult = await db.query<{
       category: string; kind: string; mode: string; state: string; environment: string | null;
       validFrom: Date | null; validUntil: Date | null; description: string;
+      permissionVersion: number | string;
+      fundingMandateId: string | null; vendorAccountId: string | null;
     }>(
       `SELECT category, kind, mode, state, execution_environment AS environment,
               valid_from AS "validFrom", valid_until AS "validUntil",
-              structured_constraints->>'description' AS description
+              structured_constraints->>'description' AS description,
+              permission_version AS "permissionVersion",
+              funding_mandate_id AS "fundingMandateId",
+              vendor_account_id AS "vendorAccountId"
        FROM procurement_instructions WHERE id = $1 AND owner_id = $2 FOR UPDATE`,
       [instructionId, job.owner_id],
     );
@@ -460,6 +500,25 @@ async function processObservation(job: DurableJob): Promise<void> {
       return reason;
     };
     if (!instruction || instruction.state !== 'ACTIVE' || instruction.environment !== 'FIXTURE') return block('INSTRUCTION_NOT_ACTIVE_FIXTURE');
+    if (scheduleVersion !== undefined && Number(instruction.permissionVersion) !== Number(scheduleVersion)) return block('STALE_SCHEDULE_VERSION');
+    if (instruction.vendorAccountId) {
+      const accountRes = await db.query<{ sessionStatus: string }>(
+        'SELECT session_status AS "sessionStatus" FROM vendor_accounts WHERE id = $1 AND owner_id = $2',
+        [instruction.vendorAccountId, job.owner_id],
+      );
+      const sessionStatus = accountRes.rows[0]?.sessionStatus;
+      if (!sessionStatus || sessionStatus === 'EXPIRED' || sessionStatus === 'REAUTH_REQUIRED') return block('REAUTH_REQUIRED');
+      if (sessionStatus === 'REVOKED') return block('MANDATE_REVOKED');
+    }
+    if (instruction.fundingMandateId) {
+      const mandateRes = await db.query<{ status: string }>(
+        'SELECT status FROM funding_mandates WHERE id = $1 AND owner_id = $2',
+        [instruction.fundingMandateId, job.owner_id],
+      );
+      const mandateStatus = mandateRes.rows[0]?.status;
+      if (!mandateStatus || mandateStatus === 'REVOKED' || mandateStatus === 'EXPIRED') return block('MANDATE_REVOKED');
+      if (mandateStatus === 'REAUTH_REQUIRED') return block('REAUTH_REQUIRED');
+    }
     if (instruction.kind !== 'WATCH' || instruction.mode !== 'NOTIFY_ONLY') return block('WATCH_PERMISSION_UNSUPPORTED');
     const dueAt = new Date(dueAtValue);
     if ((instruction.validFrom && dueAt < instruction.validFrom) || (instruction.validUntil && dueAt > instruction.validUntil)) return block('OUTSIDE_VALIDITY_WINDOW');
@@ -509,12 +568,29 @@ async function processObservation(job: DurableJob): Promise<void> {
 
 async function processJob(job: DurableJob): Promise<void> {
   try {
+    const payload: Record<string, unknown> = typeof job.payload === 'string'
+      ? JSON.parse(job.payload)
+      : (job.payload && typeof job.payload === 'object' ? job.payload : {});
+    job.payload = payload;
+
     if (job.job_type === 'OBSERVE') {
       await processObservation(job);
       return;
     }
     if (job.job_type === 'RUN_OCCURRENCE') {
       await processOccurrence(job);
+      return;
+    }
+    if ((job.job_type === 'RECONCILE' || job.job_type === 'CANCEL_RECONCILE') && payload['fixtureReconcile'] === true) {
+      await withCurrentLease(job, async (db) => {
+        await finishJob(db, job, 'FIXTURE_RECONCILIATION_COMPLETED', {
+          instructionId: job.instruction_id,
+          operationId: (payload['operationId'] as string | undefined) ?? null,
+          jobType: job.job_type,
+          fixtureOnly: true,
+        });
+      });
+      console.info(`fixture reconciliation completed id=${job.id} type=${job.job_type}`);
       return;
     }
     const reasons: Record<JobType, string> = {
@@ -562,10 +638,12 @@ async function shutdown(): Promise<void> {
   process.exit(0);
 }
 
-process.once('SIGINT', () => { void shutdown(); });
-process.once('SIGTERM', () => { void shutdown(); });
-void run().catch(async (error) => {
-  console.error(`worker stopped code=${errorCode(error)}`);
-  await pool.end();
-  process.exitCode = 1;
-});
+if (process.env['WORKER_NO_AUTO_RUN'] !== 'true') {
+  process.once('SIGINT', () => { void shutdown(); });
+  process.once('SIGTERM', () => { void shutdown(); });
+  void run().catch(async (error) => {
+    console.error(`worker stopped code=${errorCode(error)}`);
+    await pool.end();
+    process.exitCode = 1;
+  });
+}
