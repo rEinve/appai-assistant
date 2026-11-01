@@ -67,6 +67,22 @@ Common mutable aggregates include version BIGINT ≥1, created_at and updated_at
 - A linked budget supplies currency, hard maximum, optional date bounds and preferred suppliers. An instruction may narrow dates or set a lower maximum; it cannot exceed the budget. Do not create a minimum purchase amount. Preserve the prompt verbatim and keep extracted constraints/version separate so members can review or correct the interpretation.
 - Index active next_run_at; owner/state; budget_id. Increment permission_version on mode, scope, payee, budget, validity or policy-impacting edits; invalidate pending older approvals.
 
+### Conversation and agreement persistence — required amendment (FR-20)
+
+These are migration requirements, not tables claimed to exist. Retain `procurement_instructions` as the aggregate and existing financial entities; do not create a second instruction or wallet model.
+
+| Entity | Required contract |
+| --- | --- |
+| instruction_messages | id, owner_id, instruction_id, server sequence, role, exact content or protected content reference, created_at, client request key; unique instruction/sequence and owner/request key; immutable original messages, corrections appended |
+| instruction_research | id, owner_id, instruction_id, source message/tool reference, provider reference, source URL, checked_at, evidence type, price/currency when known, expiry when supplied; claims and estimates distinct from verified quotes |
+| instruction_agreements | id, owner_id, instruction_id, agreement version, instruction/permission/policy versions, supporting message sequence range, typed plan snapshot, unresolved details, member confirmation message/time nullable, superseded_at nullable; unique instruction/version |
+
+Owner-bound foreign keys cover every message, research, agreement, budget and supplier link. Plan snapshots preserve selected payee, quantity/service details, dates/timezone, total/currency or explicit unknown, cost basis, budget reference, mode and stop rule. Confirmation is a server-validated member decision, not an assistant-authored boolean. Never store credentials in dialogue or evidence.
+
+Planner entries are a derived read model joining the current agreement with occurrences and operations; no independently editable planner task or budget record. Unknown dates remain unscheduled. Add agreement reference/version to quote/approval/operation binding, retaining immutable historical snapshots after dispatch. Backfill old drafts as unconfirmed without manufacturing conversation, agreement, dates or payment consent.
+
+Agreement commit uses instruction compare-and-swap and atomically supersedes the prior agreement, increments permission version when material scope changes, invalidates unused approvals and emits an outbox event. Payment dispatch verifies the same current agreement under the existing authority transaction. In-flight operations continue reconciliation against their original snapshot.
+
 ### instruction_occurrences and procurement_obligations
 
 - instruction_occurrences: id, owner_id, instruction_id, schedule_version, due_at, local_occurrence_key, state, timestamps. UNIQUE(instruction_id, local_occurrence_key); local occurrence identity is independent of retry time.

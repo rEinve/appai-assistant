@@ -380,6 +380,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
                   next_run_at AS "nextRunAt",
                   currency, version,
                   structured_constraints AS "structuredConstraints",
+                  current_agreement_id AS "currentAgreementId",
                   created_at AS "createdAt"
            FROM procurement_instructions
            WHERE owner_id = $1
@@ -556,7 +557,41 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           [member.id, description, memberCategory, kind, category, mode, JSON.stringify(constraintsPayload),
             selectedBudget?.id ?? null, currency, maxTotalMinor, validFrom, validUntil, timezoneSnapshot],
         );
-        const resultBody = { instruction: inserted.rows[0] };
+        const instructionId = inserted.rows[0].id;
+        await db.query(
+          `INSERT INTO instruction_messages (owner_id, instruction_id, sequence_number, role, content)
+           VALUES ($1, $2, 1, 'MEMBER', $3)`,
+          [member.id, instructionId, description],
+        );
+        if (directive || recommendations.length > 0) {
+          await db.query(
+            `INSERT INTO instruction_messages (owner_id, instruction_id, sequence_number, role, content, metadata)
+             VALUES ($1, $2, 2, 'ASSISTANT', $3, $4::jsonb)`,
+            [member.id, instructionId, directive ?? 'Vetted options scouted for your review.', JSON.stringify({ recommendations })],
+          );
+        }
+        const planSnapshot = {
+          title,
+          directive,
+          budgetId: selectedBudget?.id ?? null,
+          maxTotalMinor,
+          currency,
+          validFrom,
+          validUntil,
+          timezone: timezoneSnapshot,
+          selectedProvider: null,
+        };
+        const agrRes = await db.query(
+          `INSERT INTO instruction_agreements (owner_id, instruction_id, agreement_version, instruction_version, plan_snapshot)
+           VALUES ($1, $2, 1, 1, $3::jsonb)
+           RETURNING id`,
+          [member.id, instructionId, JSON.stringify(planSnapshot)],
+        );
+        await db.query(
+          `UPDATE procurement_instructions SET current_agreement_id = $1 WHERE id = $2`,
+          [agrRes.rows[0].id, instructionId],
+        );
+        const resultBody = { instruction: { ...inserted.rows[0], currentAgreementId: agrRes.rows[0].id } };
         await db.query(
           `INSERT INTO audit_events (actor_type, actor_id, owner_id, instruction_id, action, new_state, correlation_id)
            VALUES ('MEMBER', $1, $2, $3, 'INSTRUCTION_DRAFT_CREATED', 'DRAFT', $4)`,
@@ -660,6 +695,194 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       } catch (error) {
         await db.query('ROLLBACK');
         throw error;
+      } finally {
+        db.release();
+      }
+    }
+
+    const messagesMatch = url.pathname.match(/^\/api\/v1\/instructions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/messages$/i);
+    if (messagesMatch && (request.method === 'GET' || request.method === 'POST')) {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+
+      const instructionId = messagesMatch[1];
+      if (request.method === 'GET') {
+        const messagesResult = await authRuntime.pool.query(
+          `SELECT id, sequence_number AS "sequenceNumber", role, content, metadata, created_at AS "createdAt"
+           FROM instruction_messages
+           WHERE owner_id = $1 AND instruction_id = $2
+           ORDER BY sequence_number ASC`,
+          [member.id, instructionId],
+        );
+        const agreementResult = await authRuntime.pool.query(
+          `SELECT id, agreement_version AS "agreementVersion", plan_snapshot AS "planSnapshot",
+                  unresolved_details AS "unresolvedDetails", confirmed_by_member_at AS "confirmedByMemberAt",
+                  created_at AS "createdAt"
+           FROM instruction_agreements
+           WHERE owner_id = $1 AND instruction_id = $2 AND superseded_at IS NULL
+           ORDER BY agreement_version DESC
+           LIMIT 1`,
+          [member.id, instructionId],
+        );
+        return json(response, 200, {
+          messages: messagesResult.rows,
+          agreement: agreementResult.rows[0] ?? null,
+        });
+      }
+
+      if (!originMatches(request.headers.origin)) {
+        return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED', message: 'This request origin is not allowed.' });
+      }
+      const input = await body(request);
+      const content = typeof input['content'] === 'string' ? input['content'].trim() : '';
+      const role = input['role'] === 'ASSISTANT' ? 'ASSISTANT' : 'MEMBER';
+      const metadata = input['metadata'] && typeof input['metadata'] === 'object' ? input['metadata'] : {};
+      if (content.length < 1 || content.length > 2000) {
+        return json(response, 400, { code: 'INVALID_MESSAGE', message: 'Message content must be between 1 and 2,000 characters.' });
+      }
+
+      const seqRes = await authRuntime.pool.query<{ max_seq: string | number }>(
+        `SELECT COALESCE(MAX(sequence_number), 0) AS max_seq FROM instruction_messages WHERE instruction_id = $1`,
+        [instructionId],
+      );
+      const nextSeq = Number(seqRes.rows[0].max_seq) + 1;
+      const msgRes = await authRuntime.pool.query(
+        `INSERT INTO instruction_messages (owner_id, instruction_id, sequence_number, role, content, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+         RETURNING id, sequence_number AS "sequenceNumber", role, content, metadata, created_at AS "createdAt"`,
+        [member.id, instructionId, nextSeq, role, content, JSON.stringify(metadata)],
+      );
+      return json(response, 201, { message: msgRes.rows[0] });
+    }
+
+    const confirmAgreementMatch = url.pathname.match(/^\/api\/v1\/instructions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/agreement\/confirm$/i);
+    if (request.method === 'POST' && confirmAgreementMatch) {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (!originMatches(request.headers.origin)) {
+        return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED', message: 'This request origin is not allowed.' });
+      }
+
+      const instructionId = confirmAgreementMatch[1];
+      const input = await body(request);
+      const selectedProvider = input['selectedProvider'] ?? null;
+      const budgetId = input['budgetId'] ?? null;
+      const rawMax = typeof input['maximumTotal'] === 'string' ? input['maximumTotal'].trim() : '';
+      const maximumTotal = rawMax.replace(/,/g, '');
+
+      const db = await authRuntime.pool.connect();
+      try {
+        await db.query('BEGIN');
+        const instruction = await db.query(
+          `SELECT id, version, state, kind, category, budget_id, max_total_minor, valid_from, valid_until, timezone_snapshot, structured_constraints
+           FROM procurement_instructions WHERE id = $1 AND owner_id = $2 FOR UPDATE`,
+          [instructionId, member.id],
+        );
+        const draft = instruction.rows[0];
+        if (!draft) { await db.query('ROLLBACK'); return json(response, 404, { code: 'INSTRUCTION_NOT_FOUND' }); }
+
+        let selectedBudget: { id: string; currency: string; limitMinor: string; validFrom?: Date; validUntil?: Date } | undefined;
+        if (budgetId) {
+          const bRes = await db.query(
+            `SELECT id, currency, allocation_limit_minor::text AS "limitMinor", valid_from AS "validFrom", valid_until AS "validUntil" FROM budgets WHERE id = $1 AND owner_id = $2 AND active = true`,
+            [budgetId, member.id],
+          );
+          selectedBudget = bRes.rows[0];
+        }
+
+        const settingsRes = await db.query<{ timezone: string; enabled_currency: string }>(
+          'SELECT timezone, enabled_currency FROM user_settings WHERE owner_id = $1', [member.id],
+        );
+        const userSettings = settingsRes.rows[0];
+
+        let maxTotalMinor = draft.max_total_minor;
+        let currency = draft.currency ?? selectedBudget?.currency ?? userSettings?.enabled_currency ?? 'TZS';
+        if (maximumTotal) {
+          maxTotalMinor = amountToMinor(maximumTotal, 2);
+        } else if (selectedBudget && !maxTotalMinor) {
+          maxTotalMinor = selectedBudget.limitMinor;
+        }
+
+        const constraints = { ...draft.structured_constraints };
+        if (selectedProvider) {
+          constraints.selectedProvider = selectedProvider;
+        }
+        if (!constraints.categoryDetails && selectedProvider) {
+          constraints.categoryDetails = {
+            provider: selectedProvider,
+            source: 'assistant_agreement',
+            confirmedAt: new Date().toISOString(),
+          };
+        }
+
+        const timezone = draft.timezone_snapshot ?? userSettings?.timezone ?? 'Africa/Dar_es_Salaam';
+        const validFrom = draft.valid_from ?? selectedBudget?.validFrom ?? new Date();
+        const validUntil = draft.valid_until ?? selectedBudget?.validUntil ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        const category = draft.category ?? 'PRODUCT';
+
+        await db.query(
+          `UPDATE instruction_agreements SET superseded_at = now() WHERE instruction_id = $1 AND superseded_at IS NULL`,
+          [instructionId],
+        );
+
+        const maxVerRes = await db.query<{ max_ver: string | number }>(
+          `SELECT COALESCE(MAX(agreement_version), 0) AS max_ver FROM instruction_agreements WHERE instruction_id = $1`,
+          [instructionId],
+        );
+        const nextAgreementVer = Number(maxVerRes.rows[0].max_ver) + 1;
+
+        const planSnapshot = {
+          title: constraints.title,
+          directive: constraints.directive,
+          selectedProvider,
+          budgetId: selectedBudget?.id ?? draft.budget_id,
+          maxTotalMinor,
+          currency,
+          validFrom,
+          validUntil,
+          timezone,
+        };
+
+        const newAgreement = await db.query(
+          `INSERT INTO instruction_agreements (
+             owner_id, instruction_id, agreement_version, instruction_version,
+             plan_snapshot, confirmed_by_member_at, created_at
+           )
+           VALUES ($1, $2, $3, $4, $5::jsonb, now(), now())
+           RETURNING id, agreement_version AS "agreementVersion", plan_snapshot AS "planSnapshot", confirmed_by_member_at AS "confirmedByMemberAt"`,
+          [member.id, instructionId, nextAgreementVer, draft.version, JSON.stringify(planSnapshot)],
+        );
+
+        const updated = await db.query(
+          `UPDATE procurement_instructions
+           SET current_agreement_id = $1, budget_id = COALESCE($2, budget_id),
+               max_total_minor = COALESCE($3, max_total_minor),
+               currency = COALESCE($4, currency),
+               valid_from = COALESCE(valid_from, $5),
+               valid_until = COALESCE(valid_until, $6),
+               timezone_snapshot = COALESCE(timezone_snapshot, $7),
+               category = COALESCE(category, $8),
+               structured_constraints = $9::jsonb,
+               version = version + 1, updated_at = now()
+           WHERE id = $10
+           RETURNING id, prompt_text AS "promptText", member_category AS "memberCategory", kind, category, mode, state,
+                     execution_environment AS "executionEnvironment", budget_id AS "budgetId",
+                     max_total_minor::text AS "maxTotalMinor", currency, valid_from AS "validFrom",
+                     valid_until AS "validUntil", timezone_snapshot AS "timezoneSnapshot", version,
+                     structured_constraints AS "structuredConstraints", created_at AS "createdAt"`,
+          [newAgreement.rows[0].id, selectedBudget?.id ?? null, maxTotalMinor, currency, validFrom, validUntil, timezone, category, JSON.stringify(constraints), instructionId],
+        );
+
+        await db.query('COMMIT');
+        return json(response, 200, {
+          instruction: updated.rows[0],
+          agreement: newAgreement.rows[0],
+        });
+      } catch (err) {
+        await db.query('ROLLBACK');
+        throw err;
       } finally {
         db.release();
       }

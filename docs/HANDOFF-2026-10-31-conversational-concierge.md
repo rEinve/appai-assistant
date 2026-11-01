@@ -1,5 +1,8 @@
 # A-P-P-A-I Session Handoff — Conversational Concierge & PRD Drift Resolution
 
+> **Superseded interaction direction — 1 November 2026:** follow PRD FR-20, current flows and the priority correction in the implementation plan. The instruction is a persistent conversation; research and budget/scope decisions happen there. Planner is a read-only agreement projection with no budget-entry form or instruction creation/editing. Changes return to the same conversation; payment uses current agreed scope and verified quote. Older implementation evidence below is historical, not acceptance of this journey. Any advice to estimate a payable price, suppress all consequential clarification, or manufacture verified PayPal capability is superseded.
+
+
 Date: **31 October 2026 (End of Day)**  
 Active Git Branch: `layout/workspace-spacing-optimization`  
 Last Commit: `b93b478` (`docs: establish PRD drift, additions, and clarification tracking log`)  

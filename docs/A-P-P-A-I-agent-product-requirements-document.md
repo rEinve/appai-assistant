@@ -32,7 +32,11 @@ The owner accepts that unavailable PayPal/vendor integration can stop or redirec
 
 Each instruction preserves the member's original prompt and identifies owner, desired item/service or bill account, structured constraints, maximum payable total/currency, selected budget, trigger, validity window, timezone, approval mode and completion/stop rule. The assistant may extract constraints but cannot invent missing values or grant authority. A selected budget supplies currency, hard spending ceiling, optional date limits and preferred suppliers. An instruction may narrow those dates or set a lower maximum, never exceed the budget. There is no minimum purchase amount. Drafts may be incomplete; activation requires consequential gaps to be resolved and the member to confirm the resulting scope.
 
-The member workspace organizes saved prompts under Personal, Household, Work, Travel or Other. These are private organizational labels, separate from procurement categories and permission. New instructions begin with free-form prompt entry; the interface asks for an optional organizational label and budget, then shows inherited budget bounds. The Planner opens to a day agenda and offers a month view for instruction start dates, deadlines and scheduled runs in the member's timezone. Budget allocations are created and managed in the Planner; they are spending limits, not funds or card balances. Calendar display does not activate, schedule or authorize a draft. Until an AI service is connected, the prompt flow must be presented as guided UI rather than an AI conversation.
+The member journey is **Instruction conversation → agreed plan in Planner → payment/outcome**. Instructions are persistent conversations, not prompts followed by intake forms. The assistant preserves messages, reuses known details, researches providers when requested or within existing search scope, presents source links and price evidence, and discusses alternatives until the member agrees. Ask only consequential missing questions in context; never require repeated category questionnaires or manual transcription of extracted fields. Saving a conversation does not require a budget, exact price, supplier or payment readiness.
+
+Planner is a read-only agenda/to-do projection of the agreement, organized by the agreed action dates in the member's timezone. It shows the task, selected provider, quantity, timing, agreed cost or clearly labelled estimate, and status. It does not create instructions, edit agreement fields or contain budget-entry forms. An unresolved task may appear as provisional; it cannot be presented as ready to pay. To change a plan, **Edit instruction** returns to its existing conversation; the assistant incorporates the change and regenerates the plan after agreement.
+
+Payment presents the payable total, remaining budget capacity and **Pay** or **Activate agreed schedule**, as appropriate. Confirmed funding availability is shown only when connected and verified; otherwise it is unavailable. Budget limits are not cash. Budget decisions and changes are discussed in the instruction conversation and applied through authenticated, versioned policy operations. Required provider consent remains a supported connection flow. Planner navigation and agreement to research do not grant payment authority.
 
 For a need whose supplier is not known, search the member's successful supplier history and budget preferences first, then relevant category/area sources. Return a concise, ranked shortlist of up to three candidates with source, freshness, price and fit evidence. Catalogue presence and a supplier's claim to accept PayPal do not prove purchase capability. PRE_APPROVED permission can be supplier-independent only within the member's exact service, location, terms, date and maximum-price scope, and only when the selected supplier and PayPal path are validated. REVIEW_REQUIRED always requests approval bound to the current authoritative quote; NOTIFY_ONLY cannot initiate payment.
 
@@ -42,13 +46,13 @@ A one-time need or offer watch defaults to one successful fulfillment, not one p
 
 Rules apply in this order: supported capability and current user authority; exact instruction constraints; authoritative vendor quote; hard policy and available allocation; then approval-mode decision. PRE_APPROVED bypasses per-order review only when all checks pass. REVIEW_REQUIRED always requests review even below every budget threshold. NOTIFY_ONLY never creates payment authority; the user must explicitly change the instruction or create a purchasing instruction.
 
-Hard caps and request ceilings cannot be overridden by a generic approval. To increase a limit, the user updates policy/instruction through authenticated settings, which increments its version and causes re-evaluation. A configurable soft approval threshold can require review within hard limits. Changes/revocation invalidate unused older approvals and are rechecked before external submission. Once an external submission may have happened, revoke/pause prevents new submissions but does not imply rollback of that operation.
+Hard caps and request ceilings cannot be overridden by a generic approval. To increase a limit, the user requests a policy/instruction change in the instruction conversation and explicitly confirms the authenticated, versioned change, which increments its version and causes re-evaluation. A configurable soft approval threshold can require review within hard limits. Changes/revocation invalidate unused older approvals and are rechecked before external submission. Once an external submission may have happened, revoke/pause prevents new submissions but does not imply rollback of that operation.
 
 ## 4. User journeys
 
 ### 4.1 Set and forget
 
-User signs in, configures currency/timezone, allocation, vendor account and provider consent; describes a need; reviews extracted constraints and mode; activates the instruction. Durable jobs execute while the UI is closed. Missing authentication or vendor support yields a visible BLOCKED reason and mobile action rather than repeated prompts or false success.
+User signs in and describes a need in an instruction conversation; the assistant researches and clarifies, the member agrees the plan and spending scope, Planner displays it, and the member pays or activates the agreed schedule with supported provider consent. Durable jobs execute while the UI is closed. Missing authentication or vendor support yields a visible BLOCKED reason and mobile action rather than repeated prompts or false success.
 
 ### 4.2 Pre-approved scheduled purchase or bill
 
@@ -63,6 +67,8 @@ Search on schedule/event until an eligible offer is found. Obtain an authoritati
 Before external submission, cancel the purchase operation without charging. After possible submission, show pending status until reconciled. A post-purchase cancellation is a vendor request; report success only after confirmation. Refunds are tracked separately from cancellation and do not restore allocation until the agreed accounting rule is met.
 
 ## 5. Functional requirements
+
+Amended 1 November 2026: FR-20 and AC-19–AC-21 define the owner-authorized conversational journey. Existing execution safety contracts remain binding.
 
 IDs FR-01–FR-07 retain their original domains and are amended below. New IDs cover the previously missing behaviors.
 
@@ -86,6 +92,7 @@ IDs FR-01–FR-07 retain their original domains and are amended below. New IDs c
 | FR-16 | Keep scheduler/execution independent of phone UI; validate browser-host session survival for WebMCP actions | AC-03, AC-12 |
 | FR-17 | Support watch-only mode and authenticated mode changes without silently granting purchase authority | AC-01, AC-06, AC-11 |
 | FR-18 | Retain vendor/payment boundaries for later reservation workflows without executing that extension in MVP | AC-17 |
+| FR-20 | Persist the instruction conversation, research evidence and versioned agreement; derive read-only Planner entries; route changes to the same conversation and bind payment to current agreed scope | AC-19, AC-20, AC-21 |
 | FR-19 | Provide local email/password sign-in through a maintained authentication library backed by PostgreSQL; keep member data private to the authenticated owner and support sign-out, session expiry and account recovery | AC-14, AC-18 |
 
 ## 6. Money and policy rules

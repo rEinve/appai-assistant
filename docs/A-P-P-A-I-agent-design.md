@@ -129,6 +129,10 @@ spacing:
 
 > Development alignment: v1.1, 29 October 2026. This document owns appearance. [Current user flows](A-P-P-A-I-agent-user-flow-chat.md) and the [PRD](A-P-P-A-I-agent-product-requirements-document.md) own behavior. Review-required purchases need consent even below caps; hard-cap breaches block until settings change. Payment tokens and API payloads are optional, sanitized diagnostics—not usable credentials. Pre-purchase holds are a later extension.
 
+## Member journey correction — 1 November 2026
+
+Behavior follows PRD FR-20 and current flows: instruction conversation → read-only plan → payment. Keep one composer and persistent dialogue. Avoid repeated metadata tiles, a second prompt field, New instruction within an existing instruction and internal blocker checklists. Planner shows tasks and relevant agreed details, with Edit instruction returning to dialogue. Payment prioritizes total, remaining budget and payment action; funding balance is independently verified or unavailable. No budget-entry dialog in Planner. This changes interaction requirements, not colour tokens.
+
 ## Overview
 
 The **A-P-P-A-I (Autonomous Personal Procurement Assistant Agent)** design system establishes a confident fintech/SaaS visual language for the Angular website and future product surfaces. The website is predominantly light, with white and grey Material 3 surface levels providing structure. Reserve dark navy for compact emphasis such as primary actions and member navigation. Use one sans-serif family throughout.

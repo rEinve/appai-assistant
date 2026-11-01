@@ -14,7 +14,9 @@ Build the personal procurement assistant first, not only its marketing landing p
 | --- | --- |
 | Onboarding/settings | Explicit currency/timezone and budget allocation; supported vendor/provider consent; notification permission and connection health |
 | Instruction list/detail | ACTIVE/PAUSED/etc., authority mode, next run, last check, current operation, stop rule, pause/resume/revoke |
-| Instruction creation | Natural-language draft plus structured validation/clarification; typed product, bill or accommodation details; explicit activation |
+| Instruction conversation | Persistent dialogue with one composer, provider research and source links, price discussion, natural clarification and member-confirmed agreement; no extracted-field intake form |
+| Planner | Read-only day/month agreement tasks with relevant provider, quantity, timing, cost and status; Edit instruction returns to the original conversation; no budget dialog or New instruction |
+| Payment | Payable total, remaining budget capacity and Pay/Activate agreed schedule; essential terms inspectable; verified funds distinct from limits; navigation never pays |
 | Offer review | Vendor-confirmed total/terms/expiry and exact need; approve/reject only for REVIEW_REQUIRED or soft threshold |
 | Pre-approved operation | Progress/outcome without asking again when valid prior authority applies; actual provider-required action shown as such |
 | Inbox/mobile action | Durable notification history, authenticated deep link, expired/decided/conflicting action states; opening a link never pays |
@@ -44,3 +46,7 @@ Marketing copy and competitive statistics are outside the critical application h
 Implement against the selected stack from M0. Validate the current flow and relevant AC IDs before claiming a working journey. A static page, fake PayPal status badge or local mocked transaction is not evidence of external integration. Return implemented behavior, test evidence and remaining capability blocks.
 
 The pre-purchase hold/capture workflow is a later extension. Keep reusable quote, approval and receipt components; do not activate reservation/deposit/bid actions in MVP.
+
+## Owner correction — 1 November 2026
+
+FR-20 and AC-19–21 govern the member journey. Remove the existing saved-ticket New Instruction action, repeated prompt/metadata tiles and internal fixture-readiness checklist from the conversation. Show useful assistant replies and next actions instead. Keep technical diagnostics in a separate developer surface. Home is a concise task/status entry point; start a genuinely new conversation only from Instructions. Budget decisions are conversational, not a Planner form. Do not label a rail PayPal Verified without capability evidence. No guessed timing or model-estimated price may appear as an agreed fact.

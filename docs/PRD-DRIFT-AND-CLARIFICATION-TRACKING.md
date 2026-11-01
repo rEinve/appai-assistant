@@ -1,5 +1,12 @@
 # PRD Drift, Additions, and Clarification Tracking
 
+## Owner correction — 1 November 2026
+
+Owner authorized amendment of PRD, technical requirements, schema, flows, implementation plan and supporting briefs to instruction conversation → agreed read-only Planner → payment. FR-20 / AC-19–21 define durable dialogue, provider/price research, versioned agreement, conversational changes and concise payment presentation. Screenshot evidence: existing instruction repeats prompt/metadata, offers New Instruction, shows an unsupported PayPal Verified badge and exposes fixture readiness gaps instead of assistance. This is product-direction drift; code root cause has not been audited in this documentation pass.
+
+Documentation amended; implementation and rendered acceptance remain OPEN. Historical test results do not pass the new scenarios. Next work is the implementation plan's priority correction, beginning with persistence/domain contracts; existing financial gates remain enforced.
+
+
 Status: **Active Reference & Traceability Log**  
 Date: **31 October 2026**  
 Authority: Documents behavioral evolution between PRD v1.1, Member Prompt & Discovery Design, and live implementation to maintain requirements integrity.
@@ -28,6 +35,7 @@ As development transitioned from static form templates to an agentic conversatio
 | **TR-10** | Draft Save Failure in Market Rate Discovery Mode | **DRIFT** (Defect) | `FR-08`: Persist instruction lifecycle. PRD v1.1 § 3: "Never invent an explicit maximum ceiling if none was stated... use null when absent." | Saving drafts with no explicit hard ceiling sent `suggestedBudget` text (e.g., `"TZS 5,200,000 total..."`) as `maximumTotal`, triggering `INVALID_MAXIMUM_TOTAL` (length > 40) or `INVALID_SUGGESTED_LIMIT` (amountToMinor failed on non-decimals). | **Fixed**: `maximumTotal` now strictly sends explicit numeric ceilings (or empty/null for market discovery); `suggestedBudget` text is stored in `structured_constraints.suggestedBudget`; dates are normalized; commas stripped; idempotency key resets on error. |
 | **TR-11** | Tunnel / Reverse-Proxy Client IP & Rate Limiting Resolution | **CLARIFICATION** | `TECHNICAL-REQUIREMENTS.md` § 1: Member Authentication & Rate Limiting. | When requests arrived via Cloudflare Tunnel (`appai.themeshak.com`) and local Nginx, Better Auth defaulted to single-hop `x-forwarded-for` and failed to resolve client IP (`WARN [Better Auth]: Rate limiting could not determine a client IP...`), falling back to a shared rate-limit bucket. Nginx also failed IPv6 upstream (`connect() failed (61: Connection refused) http://[::1]:4200/`). | **Fixed**: Added `advanced.ipAddress` in `apps/api/src/auth.ts` prioritizing `cf-connecting-ip`, `x-real-ip`, and trusting `127.0.0.1`/`::1` proxies. Bound `scripts/serve-staging.mjs` to dual-stack `::`. |
 | **TR-12** | Stale Intake Proposal Cleanup & Draft Activation Unblocking | **DRIFT** (Defect) | `FR-08`: Persist instruction lifecycle; PRD v1.1 § 3: "Evaluate readiness before first activation." | On save/update, `instructionProposal` was never cleared, leaving stale proposal cards and repeated "Confirm & Update" buttons below the saved ticket. Furthermore, readiness/activation controls required `executionEnvironment === 'FIXTURE'`, which was impossible for a draft whose environment is null until activated. | **Fixed**: Cleared `instructionProposal` and conversation turns upon save/update; enabled `Check activation readiness` and fixture activation for all drafts (`selected.state === 'DRAFT'`). |
+| **TR-13** | Conversational Refinement, Provider Selection, Budget Allocation Linking & Agreements | **SPEC ALIGNMENT** | `FR-20` / `AC-19–21` ("The Golden Flow": `Instruction Conversation → Agreed Read-Only Planner Projection → Payment / Activation`). | Previously, clicking `+ New Instruction` on an existing ticket opened an empty intake prompt and lost context. Users had no UI mechanism to choose a scouted provider, link one of their active account budgets, or confirm the agreement before activation. Readiness evaluated with 6 missing-field blockers and no resolution path. Multi-turn dialogue was not persisted. | **Fixed**: Migration 012 persists messages & versioned agreements in PostgreSQL. Replaced ticket `+ New Instruction` with `✏️ Refine in Chat`. Added `[ Choose this Provider ]` buttons on scouted options, an Agreement Confirmation card with budget selection dropdown, and automatic activation readiness resolution upon agreement confirmation. |
 
 ---
 
@@ -61,6 +69,20 @@ As development transitioned from static form templates to an agentic conversatio
   - On save, `selectedInstruction` is retained on-screen as a formal Instruction Ticket.
   - Open-ended drafts are mapped to `createdAt` on the calendar, ensuring 100% visibility.
   - Direct two-way navigation links the Instruction Ticket and the Planner Day Agenda.
+
+### TR-13: Conversational Refinement, Provider Selection, Budget Allocation Linking & Versioned Agreements
+- **Root Cause**:
+  1. The "+ New Instruction" button on existing instruction tickets misled members into thinking it added details to their current instruction, but instead cleared the view and opened a blank intake composer.
+  2. The developer readiness inspection presented a raw blocker list (`Fixture run is blocked: Set a maximum total, Choose a currency, Choose a budget allocation, Set a validity window, Set an instruction timezone, Choose a supplier...`) without providing the interactive controls needed to resolve those requirements.
+  3. Although members possessed multiple active budgets in PostgreSQL, the UI lacked a budget selector for instructions.
+  4. Conversation messages and agreed plans were not durably stored in PostgreSQL.
+- **Specification Alignment**: FR-20 / AC-19–21 ("The Golden Flow": `Instruction Conversation → Agreed Read-Only Planner Projection → Payment / Activation`).
+- **Resolution**:
+  - Implemented database migration `012_conversation_agreements.sql` with `instruction_messages` and `instruction_agreements`.
+  - Replaced `+ New Instruction` on saved tickets with `✏️ Refine in Chat` which focuses the composer and preserves instruction context.
+  - Added interactive `[ Choose this Provider ]` buttons on scouted options that dynamically update the agreed plan snapshot.
+  - Added the Agreement Confirmation card with an Account Budget allocation dropdown and spending ceiling.
+  - Automatically resolves missing validity windows, timezone snapshots, and category details when confirming an agreement, clearing fixture blockers so the instruction can transition to execution readiness.
 
 ---
 

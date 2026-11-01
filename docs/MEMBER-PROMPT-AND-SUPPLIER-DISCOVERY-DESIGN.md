@@ -1,5 +1,8 @@
 # Member prompt and supplier discovery design
 
+> **Superseded interaction direction — 1 November 2026:** follow PRD FR-20, current flows and the priority correction in the implementation plan. The instruction is a persistent conversation; research and budget/scope decisions happen there. Planner is a read-only agreement projection with no budget-entry form or instruction creation/editing. Changes return to the same conversation; payment uses current agreed scope and verified quote. Older implementation evidence below is historical, not acceptance of this journey. Any advice to estimate a payable price, suppress all consequential clarification, or manufacture verified PayPal capability is superseded.
+
+
 Status: **Owner-confirmed product direction; implementation and provider validation pending**  
 Date: 30 October 2026  
 Authority: product behavior direction for revision of the PRD, flow, technical contract and schema. This document does not enable external search or payment.

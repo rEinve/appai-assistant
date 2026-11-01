@@ -49,6 +49,18 @@ The initial "wallet" is a non-custodial application ledger: budgets, reservation
 
 A single vendor checkout may encapsulate payment; do not charge via a separate payment adapter as well. If payment and vendor order are separate operations, M0 must define their sequencing, compensation and status reconciliation. A provider token hash alone is not an executable credential. Use an isolated short-lived handoff or credential-store reference where supported; never expose a usable token to the model or consumer UI.
 
+## Conversational agreement contract — 1 November 2026 (FR-20)
+
+Persist one ordered, owner-scoped message stream per instruction: member, assistant and tool-result references, with request idempotency and server sequence. Reopening an instruction reloads the dialogue; no fixed six-reply business limit. Bounded model context may summarize older messages while preserving originals. Tool/provider failure preserves the conversation and offers retry.
+
+Extraction produces proposed typed facts with message/source provenance, not executable authority. Research stores source URL, checked time, provider identity, price/currency and evidence type (estimate, advertised offer, authoritative quote). Supplier content is untrusted data. The assistant may search through allowed read-only adapters; model output never directly dispatches payment.
+
+A member-confirmed agreement binds instruction version, supporting message range, selected provider/payee, quantity/category details, action dates/timezone, cost basis, budget/policy version, mode and stop rule. Incomplete agreements remain provisional. Planner is a read-only projection of current agreement and durable occurrence/operation state; it exposes no independent edit or allocation-create API. Changes are proposed through the original conversation and committed using authenticated version checks, explicit scope confirmation and existing domain validators. Older approvals become invalid when material terms change.
+
+API additions (implementation required): owner-scoped message append/list, research-result retrieval, agreement proposal/confirmation and Planner projection reads. Mutations require CSRF protection, expected aggregate version and an idempotency key; server derives owner. Payment references current agreement version and authoritative quote/obligation, reuses approval/dispatch contracts and rechecks all gates. A stale plan returns a refresh/return-to-conversation action; it cannot silently pay updated terms. Opening a payment link is read-only. Keep internal fixture diagnostics separate from the member conversation; translate blockers into one relevant explanation/action.
+
+Budget capacity is derived from existing reservations/ledger, independently of any verified funding balance. Plan estimates never become payable totals. No new allocation, mandate or payment authority is inferred from message extraction.
+
 ## 3. Shared value contracts
 
 All object IDs are unprefixed UUID strings; external IDs are opaque text in dedicated fields. Dates/times use RFC 3339 instants; schedules retain IANA timezone and local calendar rules. Monetary amounts are integer minor units serialized as decimal strings in JSON to avoid JavaScript precision loss, with ISO currency and configured scale. Domain arithmetic uses exact integers, not binary floats.

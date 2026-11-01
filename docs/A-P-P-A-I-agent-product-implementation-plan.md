@@ -4,6 +4,21 @@ Version: **1.1** · status reviewed 30 October 2026
 Status: M1 local fixture subset is PostgreSQL acceptance-tested; prompt/budget/supplier journeys and the full AC-03 schedule matrix remain unaccepted. M0 external access is not proven; payment execution stays disabled until its gate passes.  
 Read with [PRD](A-P-P-A-I-agent-product-requirements-document.md), [technical requirements](A-P-P-A-I-agent-technical-requirements-document.md), [schema](A-P-P-A-I-agent-schema.md), [flows](A-P-P-A-I-agent-user-flow-chat.md) and [acceptance](DEVELOPMENT-ACCEPTANCE.md).
 
+## Priority correction — owner-authorized 1 November 2026
+
+**Instruction conversation → agreed Planner projection → payment** replaces the manual configuration journey. Earlier M1-C/E/F/H/I descriptions below record delivered work and evidence; their field-editing, manual proposal-save and non-persistent dialogue interactions are superseded requirements, not patterns to extend. Existing builds/tests do not establish acceptance of this correction.
+
+| Step | Implementation work | Exit evidence |
+| --- | --- | --- |
+| 1. Domain and persistence | Add durable ordered conversation, research provenance and versioned member agreement per schema; retain existing instruction/budget/financial aggregates; migrate existing drafts without inventing agreement | PostgreSQL owner isolation, ordered reload, append retry, stale agreement conflict and unconfirmed backfill |
+| 2. Assistant orchestration | One persistent composer; reuse known facts; supported read-only research with links; discuss provider/price alternatives; collect consequential gaps conversationally; label estimates and unavailable tools | Multi-turn provider rejection/research/reload journey; no repeated intake, invented prices or reply-count cutoff |
+| 3. Agreement and changes | Summarize operational details and scope in dialogue; bind member confirmation to versions; changes return to that conversation and regenerate projection | Agreed provider/quantity/date/cost preserved; material change invalidates unused approval; in-flight history retained |
+| 4. Planner and navigation | Replace budget dialog/manual setup with read-only day/month tasks from agreements/occurrences; remove New instruction inside existing detail and Planner; Edit instruction returns to original dialogue | Rendered phone/desktop AC-19/20; undated research has no fabricated scheduled date; no separate plan editor |
+| 5. Payment | Present total, remaining allocation and Pay/Activate agreed schedule; verified funds separately where available; reuse consent, quote, reservation, idempotency and reconciliation | AC-21 plus existing AC-06–12; no payment from navigation, stale plan, estimate or unsupported provider |
+| 6. Acceptance and handoff | Run focused domain/database/journey/recovery checks and applicable existing financial regressions; record environment, fixtures versus real adapters and screenshots | AC-19–21 evidence and updated status; external execution remains disabled pending M0 |
+
+Implement this sequence before further UI polish or expanding category forms. No new payment rail, escrow or custody is introduced. No application changes or new acceptance passes are claimed by this documentation amendment.
+
 ## 1. Outcome and constraints
 
 Build the personal procurement assistant first: persistent instructions, scheduled purchases/bills, offer monitoring, PRE_APPROVED and REVIEW_REQUIRED execution, phone notifications and supported vendor outcomes. NOTIFY_ONLY has no purchasing authority. Add pre-purchase holds/authorization-capture later.

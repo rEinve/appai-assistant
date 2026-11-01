@@ -102,6 +102,37 @@ interface InstructionAssistantTurn { questions: string[]; reply: string; }
 interface WebSearchResult { title: string; url: string; snippet: string; }
 interface WebSearchResponse { source: string; fetchedAt: string; results: WebSearchResult[]; }
 
+interface InstructionMessage {
+  id: string;
+  sequenceNumber: number;
+  role: 'MEMBER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL';
+  content: string;
+  metadata?: {
+    recommendations?: InstructionProposalRecommendation[];
+    [key: string]: unknown;
+  };
+  createdAt: string;
+}
+
+interface InstructionAgreement {
+  id: string;
+  agreementVersion: number;
+  planSnapshot: {
+    title?: string | null;
+    directive?: string | null;
+    selectedProvider?: string | null;
+    budgetId?: string | null;
+    maxTotalMinor?: string | null;
+    currency?: string | null;
+    validFrom?: string | null;
+    validUntil?: string | null;
+    timezone?: string | null;
+  };
+  unresolvedDetails?: unknown[];
+  confirmedByMemberAt?: string | null;
+  createdAt: string;
+}
+
 interface ActivationReadiness {
   canActivate: boolean;
   canActivateFixture: boolean;
@@ -248,6 +279,10 @@ export class AppComponent implements OnInit {
   readonly instructionNotice = signal<string | null>(null);
   readonly instructionChatStep = signal<'prompt' | 'category' | 'budget' | 'review'>('prompt');
   readonly instructionAreaPreselected = signal(false);
+  readonly instructionMessages = signal<InstructionMessage[]>([]);
+  readonly currentAgreement = signal<InstructionAgreement | null>(null);
+  readonly agreementConfirming = signal(false);
+  readonly selectedProviderName = signal<string | null>(null);
   readonly selectedInstruction = signal<MemberInstruction | null>(null);
   readonly expandedInstructionCategories = signal<Record<MemberWorkspaceCategory, boolean>>({
     PERSONAL: false, HOUSEHOLD: false, WORK: false, TRAVEL: false, OTHER: false,
@@ -401,6 +436,26 @@ export class AppComponent implements OnInit {
 
     this.instructionComposerInput = '';
 
+    const selected = this.selectedInstruction();
+    if (selected) {
+      const tempMsg: InstructionMessage = {
+        id: globalThis.crypto.randomUUID(),
+        sequenceNumber: this.instructionMessages().length + 1,
+        role: 'MEMBER',
+        content: text,
+        createdAt: new Date().toISOString(),
+      };
+      this.instructionMessages.update((msgs) => [...msgs, tempMsg]);
+      this.instructionAssistantReply = text;
+      void firstValueFrom(this.http.post(
+        `${this.apiBaseUrl}/api/v1/instructions/${selected.id}/messages`,
+        { content: text, role: 'MEMBER' },
+        { withCredentials: true },
+      ));
+      void this.refineInstructionWithAssistant().then(() => this.scrollChatToBottom());
+      return;
+    }
+
     // Initial instruction prompt:
     if (!this.instructionDescription) {
       this.instructionDescription = text;
@@ -487,13 +542,30 @@ export class AppComponent implements OnInit {
       if (reply) this.instructionAssistantTurns.update((turns) => [...turns, { questions: previousProposal?.questions ?? [], reply }]);
       this.instructionAssistantReply = '';
       this.instructionProposal.set(proposal);
+      const selected = this.selectedInstruction();
+      if (selected) {
+        const assistantText = proposal.conversationalReply || proposal.summary || 'I have updated the plan with these vetted options.';
+        const assistantMsg: InstructionMessage = {
+          id: globalThis.crypto.randomUUID(),
+          sequenceNumber: this.instructionMessages().length + 1,
+          role: 'ASSISTANT',
+          content: assistantText,
+          metadata: { recommendations: proposal.recommendations },
+          createdAt: new Date().toISOString(),
+        };
+        this.instructionMessages.update((msgs) => [...msgs, assistantMsg]);
+        void firstValueFrom(this.http.post(
+          `${this.apiBaseUrl}/api/v1/instructions/${selected.id}/messages`,
+          { content: assistantText, role: 'ASSISTANT', metadata: { recommendations: proposal.recommendations } },
+          { withCredentials: true },
+        ));
+      }
       if (proposal.category && this.memberCategories.some((c) => c.id === proposal.category)) {
         this.instructionMemberCategory = proposal.category;
       }
       this.instructionMaximumTotal = proposal.maximumTotal ?? '';
       this.instructionValidFromLocal = proposal.validFromLocal ?? '';
       this.instructionValidUntilLocal = proposal.validUntilLocal ?? '';
-      const selected = this.selectedInstruction();
       if (selected) {
         const editor = this.instructionEditors()[selected.id] ?? this.editorFor(selected);
         this.instructionEditors.update((editors) => ({ ...editors, [selected.id]: {
@@ -590,6 +662,76 @@ export class AppComponent implements OnInit {
     this.instructionNotice.set(null);
     this.instructionDeleteConfirmId.set(null);
     this.instructionError.set(null);
+    this.selectedProviderName.set(
+      (instruction.structuredConstraints as Record<string, any>)?.['selectedProvider'] ?? null
+    );
+    void this.loadInstructionMessages(instruction.id);
+    if (instruction.state === 'DRAFT') {
+      void this.checkActivationReadiness(instruction.id);
+    }
+  }
+
+  async loadInstructionMessages(instructionId: string): Promise<void> {
+    try {
+      const res = await firstValueFrom(this.http.get<{ messages: InstructionMessage[]; agreement: InstructionAgreement | null }>(
+        `${this.apiBaseUrl}/api/v1/instructions/${instructionId}/messages`,
+        { withCredentials: true },
+      ));
+      this.instructionMessages.set(res.messages ?? []);
+      this.currentAgreement.set(res.agreement ?? null);
+      if (res.agreement?.planSnapshot?.selectedProvider) {
+        this.selectedProviderName.set(res.agreement.planSnapshot.selectedProvider);
+      }
+      if (res.agreement?.planSnapshot?.budgetId && !this.instructionBudgetId) {
+        this.instructionBudgetId = res.agreement.planSnapshot.budgetId;
+      }
+      this.scrollChatToBottom();
+    } catch {
+      this.instructionMessages.set([]);
+      this.currentAgreement.set(null);
+    }
+  }
+
+  selectProvider(rec: InstructionProposalRecommendation): void {
+    this.selectedProviderName.set(rec.name);
+    const selected = this.selectedInstruction();
+    if (selected) {
+      void this.confirmAgreement(selected.id, rec.name);
+    }
+  }
+
+  async confirmAgreement(instructionId: string, providerName?: string): Promise<void> {
+    const prov = providerName ?? this.selectedProviderName();
+    this.agreementConfirming.set(true);
+    this.instructionError.set(null);
+    try {
+      const res = await firstValueFrom(this.http.post<{ instruction: MemberInstruction; agreement: InstructionAgreement }>(
+        `${this.apiBaseUrl}/api/v1/instructions/${instructionId}/agreement/confirm`,
+        {
+          selectedProvider: prov,
+          budgetId: this.instructionBudgetId || null,
+          maximumTotal: this.instructionMaximumTotal || '',
+        },
+        { withCredentials: true },
+      ));
+      this.selectedInstruction.set(res.instruction);
+      this.currentAgreement.set(res.agreement);
+      this.instructions.update((items) => items.map((i) => i.id === instructionId ? res.instruction : i));
+      this.instructionNotice.set(`Agreement confirmed with ${prov || 'selected terms'}. Ready for scheduling and activation.`);
+      void this.checkActivationReadiness(instructionId);
+    } catch (err) {
+      this.instructionError.set(this.errorMessage(err, 'Could not confirm agreement.'));
+    } finally {
+      this.agreementConfirming.set(false);
+    }
+  }
+
+  refineInChat(): void {
+    const el = document.getElementById('instruction-composer-input');
+    if (el) {
+      el.focus();
+      this.scrollChatToBottom();
+    }
   }
 
   requestDiscardInstruction(instruction: MemberInstruction): void {

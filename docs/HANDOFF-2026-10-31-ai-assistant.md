@@ -1,5 +1,8 @@
 # A-P-P-A-I session handoff — 31 October 2026
 
+> **Superseded interaction direction — 1 November 2026:** follow PRD FR-20, current flows and the priority correction in the implementation plan. The instruction is a persistent conversation; research and budget/scope decisions happen there. Planner is a read-only agreement projection with no budget-entry form or instruction creation/editing. Changes return to the same conversation; payment uses current agreed scope and verified quote. Older implementation evidence below is historical, not acceptance of this journey. Any advice to estimate a payable price, suppress all consequential clarification, or manufacture verified PayPal capability is superseded.
+
+
 ## Current task
 
 Continue the member instruction UX work, then connect an AI assistant so a member can describe a need, clarify it through chat, review suggested amount/date details and save a draft. The owner wants a chat-first interaction, original instruction wording preserved, editable assistant suggestions, and confirmation before any structured details are saved. Supplier discovery/payment and real purchases remain separate capabilities.

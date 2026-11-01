@@ -24,6 +24,9 @@ Use [PRD](A-P-P-A-I-agent-product-requirements-document.md), [technical requirem
 | AC-16 | FR-04, FR-06, FR-09, FR-14 | Disable execution/circuit-break adapter with jobs in flight. No new dispatch, while status/cancel/reconciliation continue. Restore backup/restart without losing reservations or replay protection; rollback retains ability to resolve earlier operations | M4/M5 |
 | AC-17 | FR-15, FR-18 | Current interfaces cover future reservation capability but MVP cannot invoke unimplemented hold/deposit/bid/capture workflows. Every real category/adapter has a capability gate; unsupported categories show blocked, not simulated success | M0/M5 |
 | AC-18 | FR-19 | Invite-only local email/password sign-in creates one Better Auth user mapped to one application member; database-backed session, sign-out, expiry and account disablement revoke access. Missing auth configuration/database, invalid or repeated enrollment, unauthenticated and cross-user requests fail closed. Verify rate limits and that no password/session token enters app tables, model or browser storage; email recovery and sensitive-action step-up gate public rollout | M1 |
+| AC-19 | FR-02, FR-08, FR-20 | Start an incomplete need, research providers with links, reject a high price and request alternatives in the same conversation; reload preserves all turns and evidence. No duplicate prompt form, repeated category intake or fixed six-reply cutoff. Estimates never become authoritative prices; unavailable search is honest | Priority correction/M1–M2 |
+| AC-20 | FR-08, FR-20 | Confirm provider, quantity, dates and cost in dialogue; Planner shows the matching read-only agenda. No New instruction, budget dialog or agreement-field editor in Planner or existing instruction detail. Edit instruction returns to the same conversation; confirmed change regenerates the plan, rejects stale writes and invalidates unused approvals. Undated research stays undated; owner isolation holds | Priority correction/M1–M2 |
+| AC-21 | FR-04, FR-06, FR-07, FR-20 | Payment shows exact total and remaining budget, distinct from verified funds or unavailable balance. Navigation never pays. Pay binds current agreement and quote; future activation binds explicit finite scope. Missing budget is resolved through conversation; expired/changed quote, unknown total, unsupported provider or stale agreement cannot dispatch. Retry cannot double-pay; PRE_APPROVED avoids repeated approval within scope | Priority correction/M2–M3 |
 
 ## Required test layers
 
@@ -39,7 +42,7 @@ Use [PRD](A-P-P-A-I-agent-product-requirements-document.md), [technical requirem
 | --- | --- |
 | Inactive/expired/revoked instruction, invalid funding authority or unsupported adapter | Block; no new external submission |
 | Missing or changed material constraints/quote | Clarify or refresh; new review where needed |
-| Hard cap/allocation/daily rule fails | Block; user may separately change settings; old approval cannot override |
+| Hard cap/allocation/daily rule fails | Block; user may discuss and explicitly confirm a versioned limit change in the instruction conversation; old approval cannot override |
 | NOTIFY_ONLY | Observe/notify only |
 | REVIEW_REQUIRED or soft threshold reached, no valid consent | Request review; no payment |
 | PRE_APPROVED, exact constraints/current authority and all limits pass | Reserve and dispatch once |

@@ -1,5 +1,12 @@
 # A-P-P-A-I Work Status
 
+## Documentation correction — 1 November 2026
+
+Owner authorized amendment of PRD, technical requirements, schema, flows, implementation plan and supporting briefs to instruction conversation → agreed read-only Planner → payment. FR-20 / AC-19–21 define durable dialogue, provider/price research, versioned agreement, conversational changes and concise payment presentation. Screenshot evidence: existing instruction repeats prompt/metadata, offers New Instruction, shows an unsupported PayPal Verified badge and exposes fixture readiness gaps instead of assistance. This is product-direction drift; code root cause has not been audited in this documentation pass.
+
+Documentation amended; implementation and rendered acceptance remain OPEN. Historical test results do not pass the new scenarios. Next work is the implementation plan's priority correction, beginning with persistence/domain contracts; existing financial gates remain enforced.
+
+
 Updated: **31 October 2026**  
 Scope: repository implementation and proof status. See the [M1 evidence report](M1-EVIDENCE.md) for commands and observed results.
 

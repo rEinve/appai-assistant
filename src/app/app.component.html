@@ -114,6 +114,15 @@
                                       <span class="paypal-pill" title="Accepts PayPal payment">✓ PayPal</span>
                                     }
                                     @if (rec.rate) { <span class="rec-rate">{{ rec.rate }}</span> }
+                                    @if (selected.state === 'DRAFT') {
+                                      <button
+                                        type="button"
+                                        class="select-provider-btn"
+                                        [class.selected-pill]="selectedProviderName() === rec.name"
+                                        (click)="selectProvider(rec)">
+                                        {{ selectedProviderName() === rec.name ? '✓ Selected for Booking' : 'Choose this Provider' }}
+                                      </button>
+                                    }
                                   </div>
                                 </div>
                                 @if (rec.notes) { <p class="rec-notes">{{ rec.notes }}</p> }
@@ -124,18 +133,58 @@
                       }
                     }
 
+                    @if (selected.state === 'DRAFT') {
+                      <div class="agreement-status-card">
+                        <div class="agreement-header">
+                          <span class="agreement-title">📋 Next Step: Agreement & Confirmation</span>
+                          <span class="agreement-badge">{{ currentAgreement()?.confirmedByMemberAt ? '✓ Confirmed by Member' : 'Pending Confirmation' }}</span>
+                        </div>
+                        <div class="agreement-body">
+                          <div class="agreement-item">
+                            <small>Selected Provider</small>
+                            <strong>{{ selectedProviderName() || 'None chosen yet (select from candidates above)' }}</strong>
+                          </div>
+                          <div class="agreement-item">
+                            <small>Linked Account Budget</small>
+                            <select
+                              class="agreement-budget-select"
+                              [(ngModel)]="instructionBudgetId"
+                              (change)="confirmAgreement(selected.id)">
+                              <option value="">-- Choose Account Budget --</option>
+                              @for (b of budgets(); track b.id) {
+                                <option [value]="b.id">{{ b.name }} ({{ minorUnitsToDisplay(b.allocationLimitMinor, b.currency) }})</option>
+                              }
+                            </select>
+                          </div>
+                          <div class="agreement-item">
+                            <small>Spending Authority Ceiling</small>
+                            <strong>{{ selected.maxTotalMinor ? minorUnitsToDisplay(selected.maxTotalMinor, selected.currency) : (currentAgreement()?.planSnapshot?.maxTotalMinor ? minorUnitsToDisplay(currentAgreement()!.planSnapshot.maxTotalMinor!, selected.currency) : 'Estimated Market Rate') }}</strong>
+                          </div>
+                        </div>
+                        <div class="agreement-actions">
+                          <button
+                            type="button"
+                            class="dash-primary confirm-agreement-btn"
+                            (click)="confirmAgreement(selected.id)"
+                            [disabled]="agreementConfirming() || !selectedProviderName()">
+                            {{ agreementConfirming() ? 'Confirming…' : (currentAgreement()?.confirmedByMemberAt ? '✓ Agreement Confirmed' : 'Confirm Agreement & Authorize') }}
+                          </button>
+                        </div>
+                      </div>
+                    }
+
                     <div class="ticket-actions-row">
                       <button type="button" class="dash-primary ticket-action-btn" (click)="viewInstructionInPlanner(selected)">
                         📅 View in Planner
+                      </button>
+                      <button type="button" class="dash-secondary ticket-action-btn" (click)="refineInChat()">
+                        ✏️ Refine in Chat
                       </button>
                       @if (selected.state === 'DRAFT' && !readinessReports()[selected.id]) {
                         <button type="button" class="dash-secondary ticket-action-btn" (click)="checkActivationReadiness(selected.id)" [disabled]="readinessLoadingId() === selected.id">
                           {{ readinessLoadingId() === selected.id ? 'Checking readiness…' : '⚡ Check Activation Readiness' }}
                         </button>
                       }
-                      <button type="button" class="dash-secondary ticket-action-btn" (click)="startNewInstruction()">
-                        + New Instruction
-                      </button>
                       @if (selected.state === 'DRAFT') {
                         <button type="button" class="dash-secondary ticket-action-btn" (click)="requestDiscardInstruction(selected)">
                           Delete draft
@@ -143,6 +192,23 @@
                       }
                     </div>
                   </div>
+
+                  @if (instructionMessages().length > 0) {
+                    <div class="instruction-history-stream">
+                      <p class="history-stream-label">💬 Conversation & Refinements</p>
+                      @for (msg of instructionMessages(); track msg.id) {
+                        @if (msg.role === 'MEMBER') {
+                          <div class="chat-message member">
+                            <span>{{ msg.content }}</span>
+                          </div>
+                        } @else if (msg.role === 'ASSISTANT') {
+                          <div class="chat-message assistant">
+                            <p>{{ msg.content }}</p>
+                          </div>
+                        }
+                      }
+                    </div>
+                  }
 
                   @if (selected.state !== 'DRAFT') {
                     <p class="chat-message assistant">This instruction is {{ selected.state.toLowerCase() }} and can’t be edited here. You can revoke it to stop future activity.</p>
