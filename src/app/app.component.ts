@@ -1388,6 +1388,7 @@ export class AppComponent implements OnInit {
           requirements: proposal?.requirements || null,
           suggestedBudget: proposal?.suggestedBudget || null,
           recommendations: proposal?.recommendations || [],
+          selectedProvider: this.selectedProviderName() || null,
         },
         { withCredentials: true, headers: { 'Idempotency-Key': this.draftIdempotencyKey } },
       ));
@@ -1395,14 +1396,13 @@ export class AppComponent implements OnInit {
       this.memberProfile.update((profile) => profile
         ? { ...profile, workspace: { ...profile.workspace, instructionCount: profile.workspace.instructionCount + 1 } }
         : profile);
-      this.selectedInstruction.set(result.instruction);
-      this.instructionDescription = result.instruction.promptText ?? this.instructionDescription;
       this.instructionProposal.set(null);
       this.instructionAssistantTurns.set([]);
       this.instructionAssistantReply = '';
       this.draftIdempotencyKey = '';
       this.instructionNotice.set(`Instruction saved: ${result.instruction.structuredConstraints?.title || 'Draft instruction'}.`);
       this.dashboardView.set('Instructions');
+      this.selectInstruction(result.instruction);
       await this.loadInstructions();
     } catch (error) {
       this.draftIdempotencyKey = '';

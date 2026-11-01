@@ -275,6 +275,13 @@
                                   <span class="paypal-pill" title="Accepts PayPal payment">✓ PayPal</span>
                                 }
                                 @if (rec.rate) { <span class="scouted-rate">{{ rec.rate }}</span> }
+                                <button
+                                  type="button"
+                                  class="select-provider-btn"
+                                  [class.selected-pill]="selectedProviderName() === rec.name"
+                                  (click)="selectedProviderName.set(rec.name)">
+                                  {{ selectedProviderName() === rec.name ? '✓ Selected' : 'Choose this Provider' }}
+                                </button>
                               </div>
                             </div>
                             @if (rec.notes) { <p class="scouted-notes">{{ rec.notes }}</p> }

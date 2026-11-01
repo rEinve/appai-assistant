@@ -421,6 +421,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       const requirements = typeof input['requirements'] === 'string' ? input['requirements'].trim() : null;
       const intent = typeof input['intent'] === 'string' ? input['intent'].trim() : null;
       const suggestedBudget = typeof input['suggestedBudget'] === 'string' && input['suggestedBudget'].trim() ? input['suggestedBudget'].trim().slice(0, 500) : null;
+      const selectedProvider = typeof input['selectedProvider'] === 'string' && input['selectedProvider'].trim() ? input['selectedProvider'].trim().slice(0, 200) : null;
       const recommendations = Array.isArray(input['recommendations']) ? input['recommendations'] : [];
       if (!kinds.includes(String(kind)) || (category !== null && !categories.includes(String(category))) || !modes.includes(String(mode)) || !['PERSONAL', 'HOUSEHOLD', 'WORK', 'TRAVEL', 'OTHER'].includes(String(memberCategory)) || normalizedDescription.length < 3 || description.length > 2000) {
         return json(response, 400, {
@@ -537,6 +538,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           ...(title ? { title } : {}),
           ...(directive ? { directive } : {}),
           paymentRail,
+          ...(selectedProvider ? { selectedProvider } : {}),
           ...(suggestedBudget ? { suggestedBudget } : {}),
           ...(requirements ? { requirements } : {}),
           ...(intent ? { intent } : {}),
@@ -579,7 +581,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           validFrom,
           validUntil,
           timezone: timezoneSnapshot,
-          selectedProvider: null,
+          selectedProvider: selectedProvider ?? null,
         };
         const agrRes = await db.query(
           `INSERT INTO instruction_agreements (owner_id, instruction_id, agreement_version, instruction_version, plan_snapshot)
