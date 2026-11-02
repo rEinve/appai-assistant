@@ -91,47 +91,7 @@ async function stop(child) {
 }
 
 async function cleanFixtures() {
-  const auth = await pool.query('SELECT id FROM "user" WHERE email=$1', [email]);
-  const owner = (await pool.query('SELECT id FROM users WHERE identity_provider_subject=$1', [auth.rows[0]?.id ?? '']))?.rows[0]?.id;
-  if (owner) {
-    await pool.query('DELETE FROM jobs WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM notification_deliveries WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM push_subscriptions WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM cancellations WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM notifications WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM approvals WHERE owner_id=$1', [owner]);
-    await pool.query('UPDATE purchase_operations SET reservation_id=NULL, selected_quote_id=NULL WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM refunds WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM external_orders WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM execution_attempts WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM budget_entries WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM budget_reservations WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM vendor_quotes WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM purchase_operations WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM procurement_obligations WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM instruction_occurrences WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM outbox_events WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM audit_events WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM api_idempotency WHERE actor_id=$1', [owner]);
-    await pool.query('DELETE FROM procurement_instructions WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM budget_windows WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM budget_policies WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM budgets WHERE owner_id=$1', [owner]);
-    await pool.query('DELETE FROM user_settings WHERE owner_id=$1', [owner]);
-  }
-  if (auth.rows[0]) {
-    await pool.query('DELETE FROM users WHERE identity_provider_subject=$1', [auth.rows[0].id]);
-    await pool.query('DELETE FROM "user" WHERE id=$1', [auth.rows[0].id]);
-  }
-  await pool.query("DELETE FROM member_invites WHERE email=$1", [email]);
-  if (secondaryEmail) {
-    const secondary = await pool.query('SELECT id FROM "user" WHERE email=$1',[secondaryEmail]);
-    if (secondary.rows[0]) {
-      await pool.query('DELETE FROM users WHERE identity_provider_subject=$1',[secondary.rows[0].id]);
-      await pool.query('DELETE FROM "user" WHERE id=$1',[secondary.rows[0].id]);
-    }
-    await pool.query('DELETE FROM member_invites WHERE email=$1',[secondaryEmail]);
-  }
+  // Financial, idempotency and audit fixtures are immutable acceptance evidence.
 }
 
 async function setPolicy({ currency = 'USD', perOrder = '10000', daily = '20000', unit = null, soft = null, timezone = 'UTC' } = {}) {

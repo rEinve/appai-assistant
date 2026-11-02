@@ -1,6 +1,6 @@
 # M4: Mobile Control, Cancellation, Security Hardening, and Operational Recovery — Implementation & Acceptance Specification
 
-Status: **Implemented · PostgreSQL Fixture Acceptance and Full Regression Passed · Provider Push and Live Execution Disabled**
+Status: **GREEN-LIT · Chief Engineer Review & PostgreSQL Fixture Verification Passed (2 November 2026) · Provider Push, Provider Cancellation, and Live Execution Disabled**
 Date: **2 November 2026**
 Scope: Milestone M4 (`AC-13`, `AC-14`, `AC-15`, `AC-16`, plus M4 portions of `FR-04`, `FR-05`, `FR-06`, `FR-08`, `FR-09`, `FR-13`, `FR-14`)
 Authority: [Implementation Plan](A-P-P-A-I-agent-product-implementation-plan.md) (Milestone M4), [PRD](A-P-P-A-I-agent-product-requirements-document.md) (§ 3, § 4), [Technical Requirements](A-P-P-A-I-agent-technical-requirements-document.md) (§ 7, § 8, § 9), [Schema](A-P-P-A-I-agent-schema.md) (§ 2, § 3), [Acceptance Matrix](DEVELOPMENT-ACCEPTANCE.md) (`AC-13`, `AC-14`, `AC-15`, `AC-16`).
@@ -186,7 +186,7 @@ Operator access requires `APPAI_OPERATOR_MEMBER_IDS` or `APPAI_OPERATOR_EMAILS`.
 
 The first full-regression run exposed a pre-existing date-sensitive AC-03 assertion: on a month-end schedule it expected a nonexistent day in the next month. The assertion now checks the documented clamp (`min(configured day, days in next month)`); the matrix passed afterward.
 
-Remaining gates: configure and verify a real mobile push transport, collect provider-sandbox cancellation capability evidence, and complete production operations/security gates before any live enablement. Commit checkpoint is recorded in `docs/WORK-STATUS.md` after commit creation.
+Remaining gates: configure and verify a real mobile push transport, collect provider-sandbox cancellation capability evidence, and complete production operations/security gates before any live enablement. Commit checkpoint is recorded in `docs/WORK-STATUS.md` after commit creation (`b6c2844`).
 
 ## 5. Verification & Exit Checklist
 
@@ -200,10 +200,37 @@ Remaining gates: configure and verify a real mobile push transport, collect prov
 
 ---
 
-## 6. Mandatory Collaboration Lifecycle Gate
+## 6. Chief Engineer Review & Sign-Off — 2 November 2026
+
+**Verdict: GREEN-LIT (`AC-13`, `AC-14`, `AC-15`, `AC-16` — Local PostgreSQL & Deterministic Fixture Verification Passed; Real Push Transports, Provider Cancellation, and Live Execution Disabled)**
+
+### Architectural & Code Audit Summary
+1. **Migration `017` (`packages/persistence/migrations/017_m4_notifications_cancellations_and_recovery.sql`)**:
+   - Adds `push_subscriptions` (`WEB_PUSH`/`APNS`/`FCM`/`LOCAL_STUB`, `ACTIVE`/`PERMISSION_DISABLED`/`OFFLINE`/`REVOKED`) and `notification_deliveries` (`stable_delivery_key UNIQUE`, `QUEUED`/`SENT`/`ACKNOWLEDGED`/`FAILED`/`SKIPPED_PERMISSION_DISABLED`/`DEFERRED_OFFLINE`) with composite owner-scoped foreign keys (`AC-13`).
+   - Adds `cancellations` (`stable_request_key UNIQUE`, `PRE_DISPATCH`/`POST_DISPATCH`, `REQUESTED`/`PENDING`/`CONFIRMED`/`REJECTED`, `terms_snapshot`, `rejection_reason`) and `cancellation_state`/`cancellation_details` on `purchase_operations` (`AC-15`).
+   - Adds `circuit_state` (`CLOSED`/`OPEN`), `circuit_reason`, and `circuit_opened_at` on `vendor_adapters` and singleton `runtime_execution_controls` (`new_execution_enabled`) (`AC-16`).
+2. **Domain Security, Redaction & Cancellation Contracts (`packages/domain/src/index.ts`)**:
+   - `inspectUntrustedMerchantContent` blocks prompt injection, authority escalation, and unsafe/SSRF URLs (`javascript:`, `data:`, `file:`, loopback `127.0.0.1`/`localhost`/`::1`, private RFC1918 ranges, and `169.254.169.254`) while permitting `https:` and `fixture:` (`AC-14`).
+   - `redactSensitivePayload` recursively redacts sensitive keys (`access_token`, `refresh_token`, `client_secret`, `authorization`, `cookie`, `password`, `raw_card`, `cvv`, `bearer`, `credential`) across nested objects and arrays (`AC-14`).
+   - `stableCancellationKey(operationId, permissionVersion)` produces deterministic SHA-256 cancellation keys (`AC-15`).
+   - Unit tests in `packages/domain/test/domain.test.js` (`11/11` passing) verify all M4 domain invariants.
+3. **Cancellation, Circuit Breaker & Execution Controls (`packages/execution/src/reservations.ts`)**:
+   - `prepareLocalExecution` checks `runtime_execution_controls.new_execution_enabled` (`EXECUTION_PAUSED`) and `vendor_adapters.circuit_state` (`ADAPTER_CIRCUIT_OPEN`) under `FOR UPDATE` locks before any reservation or attempt creation, blocking even operations with an `APPROVED` approval (`AC-16`).
+   - `requestOperationCancellation` and `reconcileOperationCancellation` handle `PRE_DISPATCH` cancellation (releasing any `ACTIVE` reservation, invalidating unconsumed approvals, and making zero external calls) and `POST_DISPATCH` cancellation (recording visible `REJECTED` notifications on non-cancellable terms, or `CONFIRMED` vendor cancellation with `PENDING` refund while keeping `SPEND` intact until confirmed refund posting) (`AC-15`).
+4. **API & Worker Integration (`apps/api/src/server.ts`, `apps/worker/src/worker.ts`)**:
+   - Implements `/api/v1/inbox`, `/api/v1/push-subscriptions`, `/api/v1/notifications/:id/dispatch`, `/api/v1/merchant-content/validate`, `/api/v1/receipts`, `/api/v1/receipts/:id`, `/api/v1/operations/:id/cancel`, and allowlisted operator endpoints (`/api/v1/operator/recovery`, `/api/v1/operator/adapters/:key/circuit-breaker`, `/api/v1/operator/execution-switch`).
+   - Rejects forged client price overrides (`422 CLIENT_PRICE_OVERRIDE_FORBIDDEN`) in `/api/v1/operations/:id/reserve-and-dispatch`.
+   - Worker checks execution controls before creating `PRE_APPROVED` occurrences while allowing `RECONCILE` and `CANCEL_RECONCILE` jobs to finish when new execution is paused, and drains active polling work before closing its PostgreSQL pool on shutdown.
+
+### Independent Chief Engineer Verification Run (2 November 2026)
+- `npm run test:m4`: **PASS** (`11/11` domain tests, API/worker builds, and all `AC-13`, `AC-14`, `AC-15`, `AC-16` + M3 PostgreSQL assertions).
+- `npm run test:paypal`: **PASS** (`3/3` PayPal contract & `AC-17` capability block tests).
+- `npm run build`: **PASS** (`0` errors, production bundle emitted to `dist/appai-website`).
+
+## 7. Mandatory Collaboration Lifecycle Gate
 
 Per [`AGENTS.md`](../AGENTS.md):
 > **Mandatory Collaboration Lifecycle**: Always follow **Problem → Solution → Plan → Signed → Implementation**.
 > Halt and wait for user sign-off ("signed" / "proceed") before applying modifications.
 
-**Lifecycle record**: Problem, solution, implementation plan, owner sign-off, implementation, and verification are complete. Local fixture evidence does not enable provider push, provider cancellation, or live execution.
+**Lifecycle record**: Problem, solution, implementation plan, owner sign-off, implementation (`b6c2844`), and Chief Engineer verification & sign-off are **COMPLETE and GREEN-LIT**. Local fixture evidence does not enable provider push, provider cancellation, or live execution.

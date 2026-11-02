@@ -256,7 +256,7 @@ async function main() {
     const authUsers = await pool.query('SELECT id FROM "user" WHERE email = ANY($1)', [emails]);
     const authIds = authUsers.rows.map((row) => row.id);
     if (authIds.length) {
-      await pool.query('DELETE FROM users WHERE identity_provider_subject = ANY($1)', [authIds]);
+      // The application identity may own immutable audit history; preserve it after auth fixture teardown.
       await pool.query('DELETE FROM "user" WHERE id = ANY($1)', [authIds]);
     }
     if (tokens.length) await pool.query('DELETE FROM member_invites WHERE token_digest = ANY($1)', [tokens]);

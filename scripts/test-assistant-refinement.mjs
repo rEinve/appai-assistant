@@ -45,11 +45,10 @@ function expectStatus(result, status, label) {
 
 async function cleanup() {
   if (ownerId) {
-    await pool.query('DELETE FROM audit_events WHERE owner_id = $1', [ownerId]);
+    // Keep append-only audit evidence and its owner identity after the fixture run.
     await pool.query('DELETE FROM api_idempotency WHERE actor_id = $1', [ownerId]);
     await pool.query('DELETE FROM procurement_instructions WHERE owner_id = $1', [ownerId]);
     await pool.query('DELETE FROM user_settings WHERE owner_id = $1', [ownerId]);
-    await pool.query('DELETE FROM users WHERE id = $1', [ownerId]);
   }
   if (authUserId) await pool.query('DELETE FROM "user" WHERE id = $1', [authUserId]);
   await pool.query('DELETE FROM member_invites WHERE email = $1', [email]);

@@ -90,7 +90,7 @@ try {
     await new Promise((resolve) => child.once('exit', resolve));
   }
   try {
-    if (ownerId) await pool.query('DELETE FROM users WHERE id = $1', [ownerId]);
+    // Preserve the application owner if append-only audit history references it.
     if (authUserId) await pool.query('DELETE FROM "user" WHERE id = $1', [authUserId]);
     await pool.query('DELETE FROM member_invites WHERE email = $1', [email]);
   } finally { await pool.end(); }

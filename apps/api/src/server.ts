@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
-import { toNodeHandler } from 'better-auth/node';
+import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import {
   PAYPAL_M0_CAPABILITY,
   PayPalConfigurationError,
@@ -50,7 +50,7 @@ function cors(response: ServerResponse, origin?: string): void {
     response.setHeader('Access-Control-Allow-Credentials', 'true');
     response.setHeader('Vary', 'Origin');
   }
-  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Idempotency-Key, If-Match, X-Demo-Signature');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Idempotency-Key, If-Match, X-Demo-Signature, X-Require-Step-Up');
   response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
 }
 
@@ -92,6 +92,25 @@ function isOperator(member: { id: string; email: string }): boolean {
   const ids = new Set((process.env['APPAI_OPERATOR_MEMBER_IDS'] ?? '').split(',').map((id) => id.trim()).filter(Boolean));
   const emails = new Set((process.env['APPAI_OPERATOR_EMAILS'] ?? '').split(',').map((email) => email.trim().toLowerCase()).filter(Boolean));
   return ids.has(member.id) || emails.has(member.email.toLowerCase());
+}
+
+function stepUpRequired(request: IncomingMessage): boolean {
+  return process.env['APPAI_REQUIRE_STEP_UP'] === 'true' || request.headers['x-require-step-up'] === 'true';
+}
+
+async function hasCurrentStepUp(member: { id: string; authSessionTokenDigest: string }): Promise<boolean> {
+  if (!authRuntime) return false;
+  const result = await authRuntime.pool.query(
+    `SELECT 1 FROM step_up_verifications WHERE owner_id=$1 AND auth_session_token_digest=$2 AND expires_at>now() LIMIT 1`,
+    [member.id, member.authSessionTokenDigest],
+  );
+  return Boolean(result.rowCount);
+}
+
+async function requireStepUp(request: IncomingMessage, response: ServerResponse, member: { id: string; authSessionTokenDigest: string }): Promise<boolean> {
+  if (!stepUpRequired(request) || await hasCurrentStepUp(member)) return true;
+  json(response, 403, { code: 'STEP_UP_AUTH_REQUIRED' });
+  return false;
 }
 
 function localDateTimeToInstant(value: unknown, timezone: string): Date | null {
@@ -1708,6 +1727,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         return json(response, 200, { policies: policies.rows });
       }
       if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      if (!await requireStepUp(request, response, member)) return;
       const input = await body(request);
       const currency = typeof input['currency'] === 'string' ? input['currency'].trim() : '';
       const perOrder = typeof input['perOrderHardLimitMinor'] === 'string' ? input['perOrderHardLimitMinor'] : '';
@@ -1768,15 +1788,17 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       const db = await authRuntime.pool.connect();
       try {
         await db.query('BEGIN');
+        const reservationStartedAt = performance.now();
         const prepared = await prepareLocalExecution(db, member.id, reserveDispatchMatch[1]!);
+        const reservationLatencyMs = Math.round((performance.now() - reservationStartedAt) * 1000) / 1000;
         await db.query('COMMIT');
-        if (prepared.status === 'BLOCKED') return json(response, 409, { ...prepared, fixtureOnly: true, liveExecutionEnabled: false });
-        if (prepared.status === 'ALREADY_SUBMITTED') return json(response, 200, { ...prepared, fixtureOnly: true, liveExecutionEnabled: false, replay: true });
+        if (prepared.status === 'BLOCKED') return json(response, 409, { ...prepared, reservationLatencyMs, fixtureOnly: true, liveExecutionEnabled: false });
+        if (prepared.status === 'ALREADY_SUBMITTED') return json(response, 200, { ...prepared, reservationLatencyMs, fixtureOnly: true, liveExecutionEnabled: false, replay: true });
         await db.query('BEGIN');
         const outcome = await applyLocalSandboxOutcome(db, member.id, reserveDispatchMatch[1]!, faultMode);
         await db.query('COMMIT');
         return json(response, outcome['status'] === 'FAILED' ? 502 : 200, { ...outcome, reservationId: prepared.reservationId,
-          stableRequestKey: prepared.stableRequestKey, fixtureOnly: true, liveExecutionEnabled: false });
+          stableRequestKey: prepared.stableRequestKey, reservationLatencyMs, fixtureOnly: true, liveExecutionEnabled: false });
       } catch (error) {
         await db.query('ROLLBACK');
         throw error;
@@ -2441,10 +2463,86 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       } catch(error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/v1/auth/step-up') {
+      if (!authRuntime) return json(response,503,{code:'AUTH_UNAVAILABLE'});
+      const member=await resolveMember(authRuntime,request.headers); if(!member)return json(response,401,{code:'UNAUTHENTICATED'});
+      if(!originMatches(request.headers.origin))return json(response,403,{code:'ORIGIN_NOT_ALLOWED'});
+      const input=await body(request); if(typeof input['password']!=='string'||input['password'].length<1)return json(response,400,{code:'PASSWORD_REQUIRED'});
+      try { await authRuntime.auth.api.verifyPassword({headers:fromNodeHeaders(request.headers),body:{password:input['password']}}); }
+      catch { return json(response,403,{code:'PASSWORD_CONFIRMATION_FAILED'}); }
+      const saved=await authRuntime.pool.query(`INSERT INTO step_up_verifications(owner_id,auth_session_token_digest,verified_at,expires_at,reason)
+        VALUES($1,$2,now(),now()+interval '15 minutes','PASSWORD_CONFIRMED')
+        ON CONFLICT(owner_id,auth_session_token_digest) DO UPDATE SET verified_at=now(),expires_at=now()+interval '15 minutes',reason='PASSWORD_CONFIRMED'
+        RETURNING expires_at AS "expiresAt"`,[member.id,member.authSessionTokenDigest]);
+      return json(response,200,{verified:true,expiresAt:saved.rows[0]?.['expiresAt']});
+    }
+    if (request.method === 'POST' && url.pathname === '/api/v1/me/deactivate-account') {
+      if(!authRuntime)return json(response,503,{code:'AUTH_UNAVAILABLE'});
+      const member=await resolveMember(authRuntime,request.headers); if(!member)return json(response,401,{code:'UNAUTHENTICATED'});
+      if(!originMatches(request.headers.origin))return json(response,403,{code:'ORIGIN_NOT_ALLOWED'});
+      if(!await requireStepUp(request,response,member))return;
+      const db=await authRuntime.pool.connect();
+      try { await db.query('BEGIN');
+        await db.query(`UPDATE procurement_instructions SET state='CANCELLED',next_run_at=NULL,updated_at=now()
+          WHERE owner_id=$1 AND state IN ('DRAFT','ACTIVE','PAUSED')`,[member.id]);
+        const mandates=await db.query(`UPDATE funding_mandates SET status='REVOKED',revoked_at=now(),updated_at=now()
+          WHERE owner_id=$1 AND status IN ('PENDING','ACTIVE','REAUTH_REQUIRED')`,[member.id]);
+        const accounts=await db.query(`UPDATE vendor_accounts SET session_status='REVOKED',reauth_reason='ACCOUNT_DEACTIVATED',updated_at=now()
+          WHERE owner_id=$1 AND session_status IN ('ACTIVE','REAUTH_REQUIRED')`,[member.id]);
+        const jobs=await db.query(`UPDATE jobs SET state='BLOCKED',last_error_code='ACCOUNT_DEACTIVATED',updated_at=now()
+          WHERE owner_id=$1 AND job_type IN ('RUN_OCCURRENCE','OBSERVE') AND state IN ('READY','RETRY_WAIT')`,[member.id]);
+        await db.query('UPDATE users SET active=false WHERE id=$1',[member.id]);
+        await db.query(`INSERT INTO audit_events(actor_type,actor_id,owner_id,action,new_state,safe_reason)
+          VALUES('MEMBER',$1,$2,'ACCOUNT_DEACTIVATED','INACTIVE','Member requested account deactivation')`,[member.authUserId,member.id]);
+        await db.query('DELETE FROM "session" WHERE "userId"=$1',[member.authUserId]);
+        await db.query('COMMIT');
+        return json(response,200,{deactivated:true,revokedMandates:mandates.rowCount??0,revokedAccounts:accounts.rowCount??0,blockedFutureJobs:jobs.rowCount??0,unresolvedLiabilitiesPreserved:true});
+      } catch(error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
+    }
+    if(request.method==='GET'&&url.pathname==='/api/v1/operator/pilot-readiness'){
+      if(!authRuntime)return json(response,503,{code:'AUTH_UNAVAILABLE'}); const member=await resolveMember(authRuntime,request.headers); if(!member)return json(response,401,{code:'UNAUTHENTICATED'});
+      if(!isOperator(member))return json(response,403,{code:'OPERATOR_REQUIRED'});
+      const [adapters,control,liabilities,jobs,heartbeat]=await Promise.all([
+        authRuntime.pool.query(`SELECT adapter_key AS "adapterKey",environment,enabled,execution_enabled AS "executionEnabled",status,circuit_state AS "circuitState" FROM vendor_adapters ORDER BY adapter_key,environment`),
+        authRuntime.pool.query(`SELECT new_execution_enabled AS "newExecutionEnabled",paused_reason AS reason FROM runtime_execution_controls WHERE singleton_key='GLOBAL'`),
+        authRuntime.pool.query(`SELECT (SELECT count(*) FROM budget_reservations WHERE status='ACTIVE')::int AS "activeReservations",
+          (SELECT count(*) FROM purchase_operations WHERE state IN ('SUBMITTING','RECONCILING','CANCEL_REQUESTED'))::int AS "unresolvedOperations"`),
+        authRuntime.pool.query(`SELECT count(*)::int AS "dueOrBlockedJobs",round((extract(epoch FROM max(first_started_at-run_at) FILTER(WHERE first_started_at IS NOT NULL))*1000)::numeric,3) AS "maxPickupLagMs" FROM jobs WHERE state IN ('READY','RETRY_WAIT','BLOCKED') OR first_started_at IS NOT NULL`),
+        authRuntime.pool.query(`SELECT count(*) FILTER(WHERE last_seen_at>now()-interval '30 seconds')::int AS live,count(*)::int AS total FROM worker_heartbeats`),
+      ]);
+      const capabilities=[
+        {key:'local-fixture',status:'FIXTURE_PASSED',scope:'simulated purchase only'},
+        {key:'paypal-sandbox',status:'SANDBOX_PASSED',scope:'orders and webhook; execution disabled'},
+        {key:'serper-discovery',status:'SANDBOX_PASSED',scope:'read-only discovery'},
+        {key:'webmcp-browser-host',status:'BLOCKED',reason:'ACTION_REQUIRED when foreground browser UI is closed'},
+      ];
+      const unsupported=['HOLD','AUTHORIZE','CAPTURE_HOLD','VOID_HOLD','DEPOSIT','BID','ESCROW','real bill auto-pay','real accommodation booking','real mobile push transport','real vendor cancellation API'];
+      return json(response,200,{liveExecutionEnabled:false,capabilities,unsupported,adapters:adapters.rows,allLiveAdaptersDisabled:adapters.rows.every((a)=>a['environment']!=='LIVE'||a['executionEnabled']===false),worker:{heartbeatAvailable:Number(heartbeat.rows[0]?.['live']??0)>0,dueOrBlockedJobs:jobs.rows[0]?.['dueOrBlockedJobs']??0,maxPickupLagMs:jobs.rows[0]?.['maxPickupLagMs']??null},openCircuitBreakers:adapters.rows.filter((a)=>a['circuitState']==='OPEN'),executionControl:control.rows[0]??null,unresolvedLiabilities:liabilities.rows[0]});
+    }
+    if(request.method==='POST'&&url.pathname==='/api/v1/operator/retention/run'){
+      if(!authRuntime)return json(response,503,{code:'AUTH_UNAVAILABLE'}); const member=await resolveMember(authRuntime,request.headers); if(!member)return json(response,401,{code:'UNAUTHENTICATED'});
+      if(!isOperator(member))return json(response,403,{code:'OPERATOR_REQUIRED'}); if(!originMatches(request.headers.origin))return json(response,403,{code:'ORIGIN_NOT_ALLOWED'});
+      if(!await requireStepUp(request,response,member))return;
+      const db=await authRuntime.pool.connect(); const runId=randomUUID();
+      try { await db.query('BEGIN'); await db.query(`INSERT INTO data_retention_runs(id,actor_id,status) VALUES($1,$2,'RUNNING')`,[runId,member.authUserId]);
+        const idem=await db.query(`DELETE FROM api_idempotency i WHERE i.retention_until<now() AND NOT EXISTS(
+          SELECT 1 FROM purchase_operations o LEFT JOIN budget_reservations r ON r.owner_id=o.owner_id AND r.operation_id=o.id
+          WHERE (i.result_ref=o.id::text OR i.response->>'operationId'=o.id::text OR i.route_scope LIKE '%'||o.id::text||'%')
+          AND (o.state IN ('SUBMITTING','RECONCILING','CANCEL_REQUESTED') OR r.status='ACTIVE'))`);
+        const sessions=await db.query(`DELETE FROM connection_sessions WHERE expires_at<now()-interval '1 day' AND consumed_at IS NULL`);
+        const observations=await db.query(`DELETE FROM offer_observations WHERE created_at<now()-interval '90 days'`);
+        const deliveries=await db.query(`DELETE FROM notification_deliveries WHERE created_at<now()-interval '90 days' AND status IN ('DELIVERED','FAILED','CANCELLED')`);
+        const counts={apiIdempotency:idem.rowCount??0,connectionSessions:sessions.rowCount??0,offerObservations:observations.rowCount??0,notificationDeliveries:deliveries.rowCount??0};
+        await db.query(`UPDATE data_retention_runs SET completed_at=now(),pruned_counts=$2::jsonb,status='COMPLETED' WHERE id=$1`,[runId,JSON.stringify(counts)]);
+        await db.query(`INSERT INTO audit_events(actor_type,actor_id,owner_id,action,new_state,safe_reason) VALUES('OPERATOR',$1,$2,'RETENTION_PRUNED','COMPLETED',$3)`,[member.authUserId,member.id,JSON.stringify(counts)]);
+        await db.query('COMMIT'); return json(response,200,{runId,prunedCounts:counts});
+      } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    }
     if (request.method === 'POST' && url.pathname === '/api/v1/operator/execution-switch') {
       if (!authRuntime) return json(response,503,{code:'AUTH_UNAVAILABLE'});
       const member=await resolveMember(authRuntime,request.headers); if(!member) return json(response,401,{code:'UNAUTHENTICATED'});
       if(!isOperator(member)) return json(response,403,{code:'OPERATOR_REQUIRED'});
+      if(!await requireStepUp(request,response,member))return;
       if(!originMatches(request.headers.origin)) return json(response,403,{code:'ORIGIN_NOT_ALLOWED'});
       const input=await body(request); if(typeof input['newExecutionEnabled']!=='boolean'||typeof input['reason']!=='string'||input['reason'].trim().length<3) return json(response,400,{code:'INVALID_EXECUTION_CONTROL'});
       const saved=await authRuntime.pool.query(`UPDATE runtime_execution_controls SET new_execution_enabled=$1,paused_reason=$2,updated_by=$3,updated_at=now()
@@ -2457,6 +2555,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
     if(request.method==='POST'&&breakerMatch){
       if(!authRuntime)return json(response,503,{code:'AUTH_UNAVAILABLE'}); const member=await resolveMember(authRuntime,request.headers); if(!member)return json(response,401,{code:'UNAUTHENTICATED'});
       if(!isOperator(member))return json(response,403,{code:'OPERATOR_REQUIRED'});
+      if(!await requireStepUp(request,response,member))return;
       if(!originMatches(request.headers.origin))return json(response,403,{code:'ORIGIN_NOT_ALLOWED'}); const input=await body(request);
       if(!['OPEN','CLOSED'].includes(String(input['state']))||typeof input['reason']!=='string'||input['reason'].trim().length<3)return json(response,400,{code:'INVALID_CIRCUIT_BREAKER'});
       const saved=await authRuntime.pool.query(`UPDATE vendor_adapters SET circuit_state=$2,circuit_reason=$3,circuit_opened_at=CASE WHEN $2='OPEN' THEN now() ELSE NULL END
@@ -2991,6 +3090,8 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
       const member = await resolveMember(authRuntime, request.headers);
       if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      if (!await requireStepUp(request, response, member)) return;
       const targetId = decodeURIComponent(connectionRevokeMatch[1]);
       const db = await authRuntime.pool.connect();
       try {

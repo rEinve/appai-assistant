@@ -15,6 +15,7 @@ export interface MemberContext {
   email: string;
   name: string;
   authUserId: string;
+  authSessionTokenDigest: string;
 }
 
 export function createAuthRuntime(): AuthRuntime {
@@ -133,6 +134,7 @@ export async function resolveMember(runtime: AuthRuntime, headers: IncomingHttpH
   return {
     id: member.id,
     authUserId: session.user.id,
+    authSessionTokenDigest: createHash('sha256').update(session.session.token).digest('hex'),
     email: session.user.email,
     name: session.user.name,
   };

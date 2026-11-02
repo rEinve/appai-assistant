@@ -110,7 +110,7 @@ async function claimJobs(): Promise<DurableJob[]> {
        FOR UPDATE SKIP LOCKED
      )
      UPDATE jobs AS job
-     SET state = 'RUNNING', attempts = job.attempts + 1,
+     SET state = 'RUNNING', first_started_at = COALESCE(job.first_started_at, now()), attempts = job.attempts + 1,
          lease_owner = $1, lease_expires_at = now() + ($3::bigint * interval '1 millisecond'),
          lease_generation = job.lease_generation + 1, updated_at = now()
      FROM candidates

@@ -123,7 +123,6 @@ async function cleanTestFixtures() {
     await pool.query('DELETE FROM procurement_obligations WHERE owner_id = $1', [id]);
     await pool.query('DELETE FROM instruction_occurrences WHERE owner_id = $1', [id]);
     await pool.query('DELETE FROM outbox_events WHERE owner_id = $1', [id]);
-    await pool.query('DELETE FROM audit_events WHERE owner_id = $1', [id]);
     await pool.query('DELETE FROM api_idempotency WHERE actor_id = $1', [id]);
     await pool.query('DELETE FROM budget_supplier_preferences WHERE owner_id = $1', [id]);
     await pool.query('DELETE FROM member_suppliers WHERE owner_id = $1', [id]);
@@ -134,7 +133,6 @@ async function cleanTestFixtures() {
   const users = await pool.query('SELECT id FROM "user" WHERE email LIKE \'m1flow-%@example.test\'');
   const authIds = users.rows.map((row) => row.id);
   if (authIds.length) {
-    await pool.query('DELETE FROM users WHERE identity_provider_subject = ANY($1)', [authIds]);
     await pool.query('DELETE FROM "user" WHERE id = ANY($1)', [authIds]);
   }
   await pool.query("DELETE FROM member_invites WHERE email LIKE 'm1flow-%@example.test'");
