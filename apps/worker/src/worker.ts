@@ -2,7 +2,7 @@ import { hostname } from 'node:os';
 import { createHash } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import { validateProductCriteria, validateBillCriteria, validateAccommodationCriteria, reconcileQuoteTotals, computeQuoteHash } from '../../../packages/domain/src/index';
-import { applyLocalSandboxOutcome, prepareLocalExecution, reconcileLocalSandboxExecution } from '../../../packages/execution/src/reservations';
+import { applyLocalSandboxOutcome, prepareLocalExecution, reconcileLocalSandboxExecution, reconcileOperationCancellation } from '../../../packages/execution/src/reservations';
 
 type JobType = 'OBSERVE' | 'RUN_OCCURRENCE' | 'RECONCILE' | 'NOTIFY' | 'CANCEL_RECONCILE';
 
@@ -30,6 +30,7 @@ const pool = new Pool({ connectionString: databaseUrl, max: batchSize + 2, appli
 
 let stopping = false;
 let lastApprovalExpirySweep = 0;
+let workerRun: Promise<void> | null = null;
 
 function boundedInteger(raw: string | undefined, fallback: number, minimum: number, maximum: number): number {
   const parsed = Number(raw);
@@ -343,6 +344,14 @@ async function processOccurrence(job: DurableJob): Promise<void> {
       const mandateStatus = mandateRes.rows[0]?.status;
       if (!mandateStatus || mandateStatus === 'REVOKED' || mandateStatus === 'EXPIRED') return block('MANDATE_REVOKED');
       if (mandateStatus === 'REAUTH_REQUIRED') return block('REAUTH_REQUIRED');
+    }
+    if (localSandboxExecutionEnabled && instruction.mode === 'PRE_APPROVED') {
+      const executionControl = await db.query<{ enabled: boolean }>(`SELECT new_execution_enabled AS enabled
+        FROM runtime_execution_controls WHERE singleton_key='GLOBAL'`);
+      if (executionControl.rows[0]?.enabled === false) return block('EXECUTION_PAUSED');
+      const adapterCircuit = await db.query<{ state: string }>(`SELECT circuit_state AS state FROM vendor_adapters
+        WHERE adapter_key='local-fixture' AND environment='FIXTURE' AND enabled=true LIMIT 1`);
+      if (adapterCircuit.rows[0]?.state === 'OPEN') return block('ADAPTER_CIRCUIT_OPEN');
     }
     const dueAt = new Date(dueAtValue);
     if ((instruction.validFrom && dueAt < instruction.validFrom) || (instruction.validUntil && dueAt > instruction.validUntil)) return block('OUTSIDE_VALIDITY_WINDOW');
@@ -742,6 +751,17 @@ async function processJob(job: DurableJob): Promise<void> {
       }));
       return;
     }
+    if (job.job_type === 'CANCEL_RECONCILE' && payload['fixtureCancellation'] === true && typeof payload['operationId'] === 'string') {
+      const outcome = await withCurrentLease(job, async (db) => {
+        const value = await reconcileOperationCancellation(db, job.owner_id, payload['operationId'] as string);
+        if (value['status'] !== 'PENDING') await finishJob(db, job, 'FIXTURE_CANCELLATION_RECONCILED', {
+          instructionId: job.instruction_id, operationId: payload['operationId'], result: value, fixtureOnly: true,
+        });
+        return value;
+      });
+      if (outcome?.['status'] === 'PENDING') await retryJob(job, 'CANCELLATION_OUTCOME_PENDING');
+      return;
+    }
     if (job.job_type === 'CANCEL_RECONCILE' && payload['fixtureReconcile'] === true) {
       await withCurrentLease(job, async (db) => finishJob(db, job, 'FIXTURE_RECONCILIATION_COMPLETED', {
         instructionId: job.instruction_id, operationId: (payload['operationId'] as string | undefined) ?? null,
@@ -822,6 +842,7 @@ async function run(): Promise<void> {
 
 async function shutdown(): Promise<void> {
   stopping = true;
+  await workerRun;
   await pool.end();
   process.exit(0);
 }
@@ -829,7 +850,8 @@ async function shutdown(): Promise<void> {
 if (process.env['WORKER_NO_AUTO_RUN'] !== 'true') {
   process.once('SIGINT', () => { void shutdown(); });
   process.once('SIGTERM', () => { void shutdown(); });
-  void run().catch(async (error) => {
+  workerRun = run();
+  void workerRun.catch(async (error) => {
     console.error(`worker stopped code=${errorCode(error)}`);
     await pool.end();
     process.exitCode = 1;

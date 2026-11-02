@@ -1,6 +1,6 @@
 # M3: Policy, Atomic Reservations, and Safe Sandbox Purchasing — Implementation & Acceptance Specification
 
-Status: **Implemented · PostgreSQL and Regression Verification Passed · Live Execution Disabled**
+Status: **GREEN-LIT · Chief Engineer Review & PostgreSQL Verification Passed (2 November 2026) · Live Execution Disabled**
 Date: **2 November 2026**
 Scope: Milestone M3 (`AC-07`, `AC-08`, `AC-09`, `AC-10`, plus M3 portions of `AC-02`, `AC-06`, `AC-11`, `AC-12`, `AC-21`, `FR-04`, `FR-06`, `FR-09`, `FR-10`, `FR-14`, `FR-15`, `FR-16`)
 Authority: [Implementation Plan](A-P-P-A-I-agent-product-implementation-plan.md) (Milestone M3), [PRD](A-P-P-A-I-agent-product-requirements-document.md) (§ 3, § 4), [Technical Requirements](A-P-P-A-I-agent-technical-requirements-document.md) (§ 3, § 4, § 5), [Schema](A-P-P-A-I-agent-schema.md) (§ 2, § 3), [Acceptance Matrix](DEVELOPMENT-ACCEPTANCE.md) (`AC-07`, `AC-08`, `AC-09`, `AC-10`).
@@ -236,12 +236,41 @@ Delivered migration `016`, domain spending-policy validation, owner-scoped budge
 
 The M0 suite initially exposed a worker compatibility regression: legacy fixture `RECONCILE` jobs without an `operationId` no longer completed. The worker now preserves their existing completion behavior; operation-backed M3 reconciliation still uses the persisted stable request key. The rerun passed.
 
-Remaining gates: provider-sandbox vendor checkout and live execution require separate capability evidence and approval; neither is enabled by this milestone. Commit checkpoint is recorded in `docs/WORK-STATUS.md` after commit creation.
+Remaining gates: provider-sandbox vendor checkout and live execution require separate capability evidence and approval; neither is enabled by this milestone. Commit checkpoint is recorded in `docs/WORK-STATUS.md` after commit creation (`260d1b9`).
 
-## 6. Mandatory Collaboration Lifecycle Gate
+---
+
+## 6. Chief Engineer Review & Sign-Off — 2 November 2026
+
+**Verdict: GREEN-LIT (`AC-07`, `AC-08`, `AC-09`, `AC-10` — Local PostgreSQL & Deterministic Fixture Execution Verified; Provider Sandbox Checkout & Live Execution Disabled)**
+
+### Architectural & Code Audit Summary
+1. **Migration `016` (`packages/persistence/migrations/016_m3_reservations_ledger_and_attempts.sql`)**:
+   - Defines `budget_policies`, `budget_windows`, `budget_reservations`, `budget_entries`, `execution_attempts`, `external_orders`, and `refunds` with strict owner isolation, positive minor-unit checks, `UNIQUE(operation_id)` and `UNIQUE(stable_request_key)` fences on `execution_attempts`, and `reference_spend_entry_id` integrity on `REFUND` ledger entries.
+   - Adds the `approvals_stamp_policy_version` trigger so every approval captures the current `budget_policies.version`, and `PUT /api/v1/budget-policies` invalidates unconsumed approvals from older policy versions.
+   - Adds partial unique index `procurement_obligations_unique_bill_invoice` on `(owner_id, external_account_ref, COALESCE(external_invoice_ref, external_cycle_ref)) WHERE category = 'BILL'` to prevent duplicate bill obligations across instructions (`AC-09`).
+2. **Domain Spending Policy (`packages/domain/src/index.ts` — `evaluateSpendingPolicy`)**:
+   - Enforces currency alignment across quote, instruction, budget, and policy, alongside `UNIT_CAP_EXCEEDED`, `INSTRUCTION_CAP_EXCEEDED`, `ORDER_HARD_CAP_EXCEEDED`, `INSUFFICIENT_BUDGET_CAPACITY`, and `DAILY_LIMIT_EXCEEDED`.
+   - Unit test in `packages/domain/test/domain.test.js` (`9/9` passing) verifies that an `APPROVED` decision never overrides any hard cap.
+3. **Atomic Reservation, Pre-Dispatch Fencing, and Reconciliation (`packages/execution/src/reservations.ts`)**:
+   - `prepareLocalExecution` acquires `FOR UPDATE` locks in deterministic order (`procurement_instructions` → `purchase_operations` → `vendor_accounts` → `budgets` → `budget_policies` → `budget_windows` → `vendor_quotes` → `funding_mandates` → `approvals`), recomputes net spend (`SPEND - REFUND`) plus `ACTIVE` reservations (including prior-window unresolved `ACTIVE` reservations on the same policy), consumes the quote-bound approval atomically, and persists both the `ACTIVE` `budget_reservations` row and `SUBMITTING` `execution_attempts` row with `stableExecutionKey(operationId, quoteHash, permissionVersion)` before any execution step.
+   - `applyLocalSandboxOutcome` and `reconcileLocalSandboxExecution` recover `LOST_RESPONSE_AFTER_SUCCESS` and `CRASH_BEFORE_REFS` via `stable_request_key` without issuing a second purchase, hold `PAYMENT_CAPTURED_VENDOR_PENDING` in `RECONCILING` with its reservation kept `ACTIVE`, and only convert `ACTIVE` → `COMMITTED` + `SPEND` when both `payment_status = 'CAPTURED'` and `vendor_status = 'CONFIRMED'`.
+4. **API & Worker Integration (`apps/api/src/server.ts`, `apps/worker/src/worker.ts`)**:
+   - `GET/PUT /api/v1/budget-policies`, `POST /api/v1/operations/:id/reserve-and-dispatch`, and `POST /api/v1/operations/:id/refunds` enforce `APPAI_EXECUTION_MODE=local-sandbox` and confirmed-only refund restoration while preserving `liveExecutionEnabled: false`.
+   - Worker `processOccurrence` and `RECONCILE` job handlers integrate seamlessly with `prepareLocalExecution`, `applyLocalSandboxOutcome`, and `reconcileLocalSandboxExecution` while preserving M0 compatibility for legacy fixture `RECONCILE` jobs.
+
+### Independent Chief Engineer Verification Run (2 November 2026)
+- `npm run test:m3`: **PASS** (`9/9` domain tests, API/worker builds, and all `AC-07`, `AC-08`, `AC-09`, `AC-10` PostgreSQL assertions).
+- `npm run test:m0`: **PASS** (`AC-02`, `AC-12`, `AC-17`, `liveExecutionEnabled: false`).
+- `npm run test:m2`: **PASS** (M1 fixture workflow + M2 discovery, quote, approval, and watch suites).
+- `npm run test:paypal`: **PASS** (`3/3` PayPal contract & `AC-17` hold/deposit/bid block tests).
+- `npm run test:acceptance`: **PASS** (`101/101` assertions across C01–C19).
+- `npm run build`: **PASS** (`0` errors, production bundle emitted to `dist/appai-website`).
+
+## 7. Mandatory Collaboration Lifecycle Gate
 
 Per [`AGENTS.md`](../AGENTS.md):
 > **Mandatory Collaboration Lifecycle**: Always follow **Problem → Solution → Plan → Signed → Implementation**.
 > Halt and wait for user sign-off ("signed" / "proceed") before applying modifications.
 
-**Lifecycle record**: Problem, solution, implementation plan, owner sign-off, and implementation are complete. This report records the implementation and verification evidence for Chief Engineer review.
+**Lifecycle record**: Problem, solution, implementation plan, owner sign-off, implementation (`260d1b9`), and Chief Engineer verification & sign-off are **COMPLETE and GREEN-LIT**.

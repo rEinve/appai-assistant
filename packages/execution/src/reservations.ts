@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { evaluateSpendingPolicy, stableExecutionKey } from '../../domain/src/index';
+import { evaluateSpendingPolicy, stableExecutionKey, stableCancellationKey } from '../../domain/src/index';
 
 export type SandboxFaultMode = 'NONE' | 'LOST_RESPONSE_AFTER_SUCCESS' | 'CRASH_BEFORE_REFS' | 'PAYMENT_CAPTURED_VENDOR_PENDING' | 'DEFINITIVE_FAILURE';
 
@@ -67,6 +67,15 @@ export async function prepareLocalExecution(db: PoolClient, ownerId: string, ope
   if (inst.fulfilledCount >= (inst.completionLimit ?? Number.MAX_SAFE_INTEGER)) return blockOperation(db, ownerId, operationId, 'COMPLETION_LIMIT_REACHED');
   if (!['READY', 'FIXTURE_APPROVED'].includes(op.state)) return blockOperation(db, ownerId, operationId, 'OPERATION_NOT_READY');
   if (Number(op.permissionVersion) !== Number(inst.permissionVersion)) return blockOperation(db, ownerId, operationId, 'STALE_PERMISSION_VERSION');
+
+  const controls = await db.query<{ enabled: boolean }>(`SELECT new_execution_enabled AS enabled
+    FROM runtime_execution_controls WHERE singleton_key='GLOBAL' FOR UPDATE`);
+  if (controls.rows[0]?.enabled === false) return blockOperation(db, ownerId, operationId, 'EXECUTION_PAUSED');
+  const adapter = await db.query<{ id: string; adapterVersion: string; circuitState: string }>(
+    `SELECT id, adapter_version AS "adapterVersion", circuit_state AS "circuitState" FROM vendor_adapters
+     WHERE adapter_key='local-fixture' AND environment='FIXTURE' AND enabled=true AND execution_enabled=false AND status='VERIFIED' FOR UPDATE`);
+  if (adapter.rows[0]?.circuitState === 'OPEN') return blockOperation(db, ownerId, operationId, 'ADAPTER_CIRCUIT_OPEN');
+  if (!adapter.rows[0]) return blockOperation(db, ownerId, operationId, 'LOCAL_SANDBOX_ADAPTER_UNAVAILABLE');
 
   if (inst.vendorAccountId) {
     const account = await db.query<{ status: string }>(
@@ -168,10 +177,6 @@ export async function prepareLocalExecution(db: PoolClient, ownerId: string, ope
     stableRequestKey: existingAttempt.rows[0].stableRequestKey, reservationId: existingAttempt.rows[0].reservationId,
     amountMinor: quote.totalMinor, currency: quote.currency.trim(), environment: 'FIXTURE' };
 
-  const adapter = await db.query<{ id: string; adapterVersion: string }>(
-    `SELECT id, adapter_version AS "adapterVersion" FROM vendor_adapters
-     WHERE adapter_key='local-fixture' AND environment='FIXTURE' AND enabled=true AND execution_enabled=false AND status='VERIFIED'`);
-  if (!adapter.rows[0]) return blockOperation(db, ownerId, operationId, 'LOCAL_SANDBOX_ADAPTER_UNAVAILABLE');
   const reservation = await db.query<{ id: string }>(
     `INSERT INTO budget_reservations(owner_id, operation_id, budget_id, budget_window_id, currency, amount_minor, status)
      VALUES($1,$2,$3,$4,$5,$6,'ACTIVE') RETURNING id`, [ownerId, operationId, inst.budgetId, windowId, quote.currency.trim(), quote.totalMinor]);
@@ -286,6 +291,88 @@ export async function reconcileLocalSandboxExecution(db: PoolClient, ownerId: st
     return { status: 'FAILED' };
   }
   return { status: 'RECONCILING' };
+}
+
+export type CancellationFaultMode = 'CONFIRMED_NO_REFUND_YET' | 'REJECTED_NON_CANCELLABLE' | 'PENDING_VENDOR';
+
+export async function requestOperationCancellation(db: PoolClient, ownerId: string, operationId: string,
+  faultMode: CancellationFaultMode = 'CONFIRMED_NO_REFUND_YET'): Promise<Record<string, unknown>> {
+  const locked = await db.query<{ state: string; permissionVersion: number | string; environment: string; quoteDetails: Record<string, unknown> | null; attemptId: string | null }>(
+    `SELECT o.state, i.permission_version AS "permissionVersion", i.execution_environment AS environment,
+            q.typed_details AS "quoteDetails", a.id AS "attemptId"
+     FROM purchase_operations o JOIN procurement_instructions i ON i.owner_id=o.owner_id AND i.id=o.instruction_id
+     LEFT JOIN vendor_quotes q ON q.owner_id=o.owner_id AND q.id=o.selected_quote_id
+     LEFT JOIN execution_attempts a ON a.owner_id=o.owner_id AND a.operation_id=o.id
+     WHERE o.owner_id=$1 AND o.id=$2 FOR UPDATE OF o,i`, [ownerId, operationId]);
+  const op = locked.rows[0];
+  if (!op) return { status: 'NOT_FOUND' };
+  if (op.environment !== 'FIXTURE') return { status: 'UNSUPPORTED_ENVIRONMENT' };
+  const prior = await db.query<{ id: string; status: string; stableRequestKey: string }>(
+    'SELECT id,status,stable_request_key AS "stableRequestKey" FROM cancellations WHERE owner_id=$1 AND operation_id=$2 FOR UPDATE', [ownerId, operationId]);
+  if (prior.rows[0]) return { status: prior.rows[0].status, cancellationId: prior.rows[0].id, replay: true,
+    stableRequestKey: prior.rows[0].stableRequestKey };
+
+  const postDispatch = Boolean(op.attemptId) || ['SUBMITTING', 'RECONCILING', 'SUCCEEDED', 'CANCEL_REQUESTED'].includes(op.state);
+  const stage = postDispatch ? 'POST_DISPATCH' : 'PRE_DISPATCH';
+  const key = stableCancellationKey(operationId, Number(op.permissionVersion));
+  const terms = op.quoteDetails?.['terms'] && typeof op.quoteDetails['terms'] === 'object' ? op.quoteDetails['terms'] as Record<string, unknown> : {};
+  if (!postDispatch) {
+    const cancellation = await db.query<{ id: string }>(`INSERT INTO cancellations(owner_id,operation_id,stable_request_key,status,cancellation_stage,terms_snapshot,resolved_at)
+      VALUES($1,$2,$3,'CONFIRMED','PRE_DISPATCH',$4::jsonb,now()) RETURNING id`,
+      [ownerId, operationId, key, JSON.stringify({ result: 'PRE_DISPATCH', terms })]);
+    await db.query(`UPDATE approvals SET status='INVALIDATED', decided_at=now(), version=version+1
+      WHERE owner_id=$1 AND operation_id=$2 AND status IN ('PENDING','APPROVED') AND consumed_at IS NULL`, [ownerId, operationId]);
+    await db.query(`UPDATE budget_reservations SET status='RELEASED', released_at=now()
+      WHERE owner_id=$1 AND operation_id=$2 AND status='ACTIVE'`, [ownerId, operationId]);
+    await db.query(`UPDATE purchase_operations SET state='CANCELLED', cancellation_state='CONFIRMED',
+      cancellation_details=$3::jsonb, version=version+1, updated_at=now() WHERE owner_id=$1 AND id=$2`,
+      [ownerId, operationId, JSON.stringify({ cancellationId: cancellation.rows[0]!.id, stage })]);
+    return { status: 'CONFIRMED', cancellationId: cancellation.rows[0]!.id, stage, stableRequestKey: key, externalCall: false };
+  }
+  const cancellation = await db.query<{ id: string }>(`INSERT INTO cancellations(owner_id,operation_id,stable_request_key,status,cancellation_stage,terms_snapshot)
+    VALUES($1,$2,$3,'PENDING','POST_DISPATCH',$4::jsonb) RETURNING id`,
+    [ownerId, operationId, key, JSON.stringify({ result: faultMode, terms })]);
+  await db.query(`UPDATE purchase_operations SET state=CASE WHEN state='SUCCEEDED' THEN state ELSE 'CANCEL_REQUESTED' END,
+      cancellation_state='PENDING', cancellation_details=$3::jsonb, version=version+1, updated_at=now()
+    WHERE owner_id=$1 AND id=$2`, [ownerId, operationId, JSON.stringify({ cancellationId: cancellation.rows[0]!.id })]);
+  await db.query(`INSERT INTO jobs(owner_id,instruction_id,job_type,dedupe_key,payload,run_at)
+    SELECT o.owner_id,o.instruction_id,'CANCEL_RECONCILE','cancel:'||o.id::text,
+      jsonb_build_object('operationId',o.id,'fixtureCancellation',true),now()
+    FROM purchase_operations o WHERE o.owner_id=$1 AND o.id=$2
+    ON CONFLICT(dedupe_key) DO NOTHING`, [ownerId, operationId]);
+  return { status: 'PENDING', cancellationId: cancellation.rows[0]!.id, stage, stableRequestKey: key, externalCall: false };
+}
+
+export async function reconcileOperationCancellation(db: PoolClient, ownerId: string, operationId: string): Promise<Record<string, unknown>> {
+  const result = await db.query<{ id: string; status: string; termsSnapshot: Record<string, unknown>; amountMinor: string; currency: string; instructionId: string }>(
+    `SELECT c.id,c.status,c.terms_snapshot AS "termsSnapshot",r.amount_minor::text AS "amountMinor",r.currency,o.instruction_id AS "instructionId"
+     FROM cancellations c JOIN purchase_operations o ON o.owner_id=c.owner_id AND o.id=c.operation_id
+     LEFT JOIN budget_reservations r ON r.owner_id=o.owner_id AND r.operation_id=o.id
+     WHERE c.owner_id=$1 AND c.operation_id=$2 FOR UPDATE OF c,o`, [ownerId, operationId]);
+  const cancellation = result.rows[0];
+  if (!cancellation) return { status: 'NOT_FOUND' };
+  if (cancellation.status === 'CONFIRMED' || cancellation.status === 'REJECTED') return { status: cancellation.status };
+  const mode = cancellation.termsSnapshot['result'];
+  if (mode === 'PENDING_VENDOR') return { status: 'PENDING' };
+  const cancellationTerms = cancellation.termsSnapshot['terms'] && typeof cancellation.termsSnapshot['terms'] === 'object'
+    ? cancellation.termsSnapshot['terms'] as Record<string, unknown> : {};
+  if (mode === 'REJECTED_NON_CANCELLABLE' || cancellationTerms['cancellationPreference'] === 'NON_REFUNDABLE') {
+    await db.query(`UPDATE cancellations SET status='REJECTED',rejection_reason='CANCELLATION_REJECTED_BY_VENDOR',resolved_at=now(),version=version+1 WHERE owner_id=$1 AND id=$2`, [ownerId,cancellation.id]);
+    await db.query(`UPDATE purchase_operations SET cancellation_state='REJECTED',cancellation_details=jsonb_build_object('reason','CANCELLATION_REJECTED_BY_VENDOR'),version=version+1,updated_at=now() WHERE owner_id=$1 AND id=$2`, [ownerId,operationId]);
+    await db.query(`INSERT INTO notifications(owner_id,operation_id,instruction_id,event_key,type,safe_content)
+      VALUES($1,$2,$3,$4,'FIXTURE_RESULT',$5::jsonb) ON CONFLICT(event_key) DO NOTHING`,
+      [ownerId,operationId,cancellation.instructionId,`cancel-rejected:${cancellation.id}`,JSON.stringify({ label:'LOCAL FIXTURE ONLY',message:'The vendor rejected this cancellation. The confirmed spend remains recorded.', reason:'CANCELLATION_REJECTED_BY_VENDOR' })]);
+    return { status:'REJECTED', reason:'CANCELLATION_REJECTED_BY_VENDOR' };
+  }
+  await db.query(`UPDATE cancellations SET status='CONFIRMED',resolved_at=now(),version=version+1 WHERE owner_id=$1 AND id=$2`, [ownerId,cancellation.id]);
+  await db.query(`UPDATE purchase_operations SET cancellation_state='CONFIRMED',version=version+1,updated_at=now() WHERE owner_id=$1 AND id=$2`, [ownerId,operationId]);
+  await db.query(`UPDATE external_orders SET vendor_status='CANCELLED',verified_at=now() WHERE owner_id=$1 AND operation_id=$2`, [ownerId,operationId]);
+  if (cancellation.amountMinor && cancellation.currency) {
+    await db.query(`INSERT INTO refunds(owner_id,operation_id,external_ref,expected_amount_minor,currency,status)
+      VALUES($1,$2,$3,$4,$5,'PENDING') ON CONFLICT(owner_id,external_ref) DO NOTHING`,
+      [ownerId,operationId,`cancellation:${cancellation.id}`,cancellation.amountMinor,cancellation.currency.trim()]);
+  }
+  return { status:'CONFIRMED', refundStatus:'PENDING', capacityRestored:'0' };
 }
 
 async function completeLocalExecution(db: PoolClient, ownerId: string, operationId: string, row: {

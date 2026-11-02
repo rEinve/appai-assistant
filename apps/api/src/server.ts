@@ -17,8 +17,10 @@ import {
   validateAccommodationCriteria,
   reconcileQuoteTotals,
   computeQuoteHash,
+  inspectUntrustedMerchantContent,
+  redactSensitivePayload,
 } from '../../../packages/domain/src/index';
-import { applyLocalSandboxOutcome, prepareLocalExecution, type SandboxFaultMode } from '../../../packages/execution/src/reservations';
+import { applyLocalSandboxOutcome, prepareLocalExecution, requestOperationCancellation, type CancellationFaultMode, type SandboxFaultMode } from '../../../packages/execution/src/reservations';
 
 const port = Number(process.env['APP_PORT'] ?? 4300);
 const mode = process.env['PAYPAL_DEMO_MODE'] ?? 'fixture';
@@ -49,7 +51,7 @@ function cors(response: ServerResponse, origin?: string): void {
     response.setHeader('Vary', 'Origin');
   }
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Idempotency-Key, If-Match, X-Demo-Signature');
-  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, OPTIONS');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
 }
 
 function json(response: ServerResponse, status: number, value: unknown): void {
@@ -84,6 +86,12 @@ function validTimezone(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 100) return false;
   try { new Intl.DateTimeFormat('en', { timeZone: value }); return true; }
   catch { return false; }
+}
+
+function isOperator(member: { id: string; email: string }): boolean {
+  const ids = new Set((process.env['APPAI_OPERATOR_MEMBER_IDS'] ?? '').split(',').map((id) => id.trim()).filter(Boolean));
+  const emails = new Set((process.env['APPAI_OPERATOR_EMAILS'] ?? '').split(',').map((email) => email.trim().toLowerCase()).filter(Boolean));
+  return ids.has(member.id) || emails.has(member.email.toLowerCase());
 }
 
 function localDateTimeToInstant(value: unknown, timezone: string): Date | null {
@@ -1746,6 +1754,15 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
       if (!localSandboxExecutionEnabled) return json(response, 503, { code: 'EXECUTION_DISABLED', liveExecutionEnabled: false });
       const input = await body(request);
+      const clientPriceKeys = ['amountMinor', 'totalMinor', 'price'].filter((key) => Object.hasOwn(input, key));
+      if (clientPriceKeys.length) {
+        const quote = await authRuntime.pool.query<{ totalMinor: string }>(`SELECT q.total_minor::text AS "totalMinor"
+          FROM purchase_operations o JOIN vendor_quotes q ON q.owner_id=o.owner_id AND q.operation_id=o.id AND q.id=o.selected_quote_id
+          WHERE o.owner_id=$1 AND o.id=$2`, [member.id, reserveDispatchMatch[1]]);
+        const total = quote.rows[0]?.totalMinor;
+        const allMatch = Boolean(total) && clientPriceKeys.every((key) => typeof input[key] === 'string' && input[key] === total);
+        if (!allMatch) return json(response, 422, { code: 'CLIENT_PRICE_OVERRIDE_FORBIDDEN' });
+      }
       const faultModes: SandboxFaultMode[] = ['NONE', 'LOST_RESPONSE_AFTER_SUCCESS', 'CRASH_BEFORE_REFS', 'PAYMENT_CAPTURED_VENDOR_PENDING', 'DEFINITIVE_FAILURE'];
       const faultMode = faultModes.includes(input['faultMode'] as SandboxFaultMode) ? input['faultMode'] as SandboxFaultMode : 'NONE';
       const db = await authRuntime.pool.connect();
@@ -2202,9 +2219,12 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       const key = request.headers['idempotency-key'];
       if (typeof key !== 'string' || key.length < 8 || key.length > 128) return json(response, 400, { code: 'IDEMPOTENCY_KEY_REQUIRED' });
       const input = await body(request);
+      const merchantSafety = inspectUntrustedMerchantContent({ merchantRef: input['merchantRef'], typedDetails: input['typedDetails'], terms: input['terms'] });
+      if (!merchantSafety.safe) return json(response, 422, { code: 'UNTRUSTED_MERCHANT_CONTENT', issues: merchantSafety.issues });
       if (['SEARCH_SNIPPET', 'ESTIMATE', 'ADVERTISED_OFFER', 'STALE_STOCK'].includes(String(input['evidenceType']))) return json(response, 422, { code: 'NON_AUTHORITATIVE_DISCOVERY_EVIDENCE' });
       if (input['evidenceType'] !== 'AUTHORITATIVE_QUOTE') return json(response, 422, { code: 'NON_AUTHORITATIVE_DISCOVERY_EVIDENCE' });
-      const details = input['typedDetails'];
+      const details = redactSensitivePayload(input['typedDetails']);
+      const safeTerms = redactSensitivePayload(input['terms'] ?? {});
       const totals = input['amounts'] as Record<string, unknown> | undefined;
       const sourceQuoteKey = typeof input['sourceQuoteKey'] === 'string' ? input['sourceQuoteKey'].trim() : '';
       const merchantRef = typeof input['merchantRef'] === 'string' ? input['merchantRef'].trim() : '';
@@ -2240,7 +2260,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           : instruction.category === 'BILL' ? [['payeeName', 'payeeName'], ['accountRef', 'accountRef'], ['invoiceRef', 'invoiceRef'], ['billingCycle', 'billingCycle'], ['unpaidStatus', 'unpaidStatus']]
             : [['destination', 'destination'], ['checkIn', 'checkIn'], ['checkOut', 'checkOut'], ['guests', 'guests'], ['rooms', 'rooms'], ['rateType', 'rateType'], ['cancellationTerms', 'cancellationTerms']];
         if (comparable.some(([want, got]) => expected[want] !== undefined && String(expected[want]).trim().toLowerCase() !== String(actual[got] ?? '').trim().toLowerCase())) { await db.query('ROLLBACK'); return json(response, 422, { code: 'CATEGORY_CRITERIA_MISMATCH' }); }
-        const canonicalQuote = { sourceQuoteKey, subtotalMinor: String(totals['subtotalMinor'] ?? ''), taxMinor: String(totals['taxMinor'] ?? '0'), shippingMinor: String(totals['shippingMinor'] ?? '0'), feesMinor: String(totals['feesMinor'] ?? '0'), discountMinor: String(totals['discountMinor'] ?? '0'), totalMinor: String(totals['totalMinor'] ?? ''), currency, payee: merchantRef, terms: input['terms'] ?? {} };
+        const canonicalQuote = { sourceQuoteKey, subtotalMinor: String(totals['subtotalMinor'] ?? ''), taxMinor: String(totals['taxMinor'] ?? '0'), shippingMinor: String(totals['shippingMinor'] ?? '0'), feesMinor: String(totals['feesMinor'] ?? '0'), discountMinor: String(totals['discountMinor'] ?? '0'), totalMinor: String(totals['totalMinor'] ?? ''), currency, payee: merchantRef, terms: safeTerms };
         const quoteValidation = reconcileQuoteTotals(canonicalQuote, instruction.currency.trim());
         if (!quoteValidation.valid) { await db.query('ROLLBACK'); const first = quoteValidation.issues[0]?.code ?? 'INVALID_QUOTE'; return json(response, 422, { code: first }); }
         if (BigInt(canonicalQuote.totalMinor) > BigInt(instruction.maxTotalMinor)) { await db.query('ROLLBACK'); return json(response, 422, { code: 'QUOTE_EXCEEDS_MAX_TOTAL' }); }
@@ -2265,7 +2285,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         const quote = await db.query<{ id: string }>(`INSERT INTO vendor_quotes
           (owner_id, operation_id, adapter_id, adapter_version, environment, merchant_ref, external_quote_ref, category, schema_version, typed_details, currency, subtotal_minor, tax_minor, fees_minor, shipping_minor, discount_minor, total_minor, quantity, terms_hash, content_hash, verified_at, expires_at)
           VALUES ($1, $2, $3, $4, 'FIXTURE', $5, $6, $7::instruction_category, 'm2-1.0', $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now(), now() + interval '24 hours') RETURNING id`,
-          [member.id, operation.rows[0]!.id, adapter.rows[0].id, adapter.rows[0].adapterVersion, merchantRef, sourceQuoteKey, instruction.category, JSON.stringify({ ...actual, evidenceType: 'AUTHORITATIVE_QUOTE', fixtureOnly: true, terms: input['terms'] ?? {} }), currency, canonicalQuote.subtotalMinor, canonicalQuote.taxMinor, canonicalQuote.feesMinor, canonicalQuote.shippingMinor, canonicalQuote.discountMinor, canonicalQuote.totalMinor, quantity, createHash('sha256').update(JSON.stringify(input['terms'] ?? {})).digest('hex'), contentHash]);
+          [member.id, operation.rows[0]!.id, adapter.rows[0].id, adapter.rows[0].adapterVersion, merchantRef, sourceQuoteKey, instruction.category, JSON.stringify({ ...actual, evidenceType: 'AUTHORITATIVE_QUOTE', fixtureOnly: true, terms: safeTerms }), currency, canonicalQuote.subtotalMinor, canonicalQuote.taxMinor, canonicalQuote.feesMinor, canonicalQuote.shippingMinor, canonicalQuote.discountMinor, canonicalQuote.totalMinor, quantity, createHash('sha256').update(JSON.stringify(safeTerms)).digest('hex'), contentHash]);
         const softThreshold = instruction.constraints['softReviewThresholdMinor'] ?? expected['softReviewThresholdMinor'];
         const needsReview = instruction.mode === 'REVIEW_REQUIRED' || (instruction.mode === 'PRE_APPROVED' && softThreshold !== undefined && BigInt(canonicalQuote.totalMinor) > BigInt(String(softThreshold)));
         const operationState = needsReview ? 'FIXTURE_AWAITING_REVIEW' : instruction.mode === 'PRE_APPROVED' ? 'FIXTURE_COMPLETED' : 'FIXTURE_QUOTED';
@@ -2287,6 +2307,177 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         if (error && typeof error === 'object' && 'code' in error && error.code === '23505') return json(response, 409, { code: 'QUOTE_ALREADY_RECORDED' });
         throw error;
       } finally { db.release(); }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/v1/merchant-content/validate') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      const input = await body(request);
+      const inspected = inspectUntrustedMerchantContent({ content: input['content'], urls: input['urls'], metadata: input['metadata'] });
+      const safePayload = redactSensitivePayload(input);
+      return inspected.safe
+        ? json(response, 200, { safe: true, sanitized: safePayload })
+        : json(response, 422, { code: 'UNTRUSTED_MERCHANT_CONTENT', issues: inspected.issues, sanitized: safePayload });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/v1/inbox') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const result = await authRuntime.pool.query(`SELECT n.id,n.operation_id AS "operationId",n.instruction_id AS "instructionId",n.type,
+          n.safe_content AS content,n.created_at AS "createdAt",n.read_at AS "readAt",
+          d.status AS "deliveryStatus",d.next_retry_at AS "nextRetryAt",d.safe_error AS "deliveryError"
+        FROM notifications n LEFT JOIN LATERAL (SELECT status,next_retry_at,safe_error FROM notification_deliveries x
+          WHERE x.owner_id=n.owner_id AND x.notification_id=n.id ORDER BY x.created_at DESC LIMIT 1) d ON true
+        WHERE n.owner_id=$1 ORDER BY n.created_at DESC LIMIT 100`, [member.id]);
+      return json(response, 200, { notifications: result.rows.map((row) => redactSensitivePayload(row)), durable: true });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/v1/push-subscriptions') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      const input = await body(request);
+      const transport = input['transport']; const endpointRef = input['protectedEndpointRef'];
+      const status = input['status'] ?? 'ACTIVE'; const label = typeof input['deviceLabel'] === 'string' ? input['deviceLabel'].slice(0,100) : null;
+      if (!['WEB_PUSH','APNS','FCM','LOCAL_STUB'].includes(String(transport)) || typeof endpointRef !== 'string'
+          || endpointRef.length < 8 || endpointRef.length > 240 || !['ACTIVE','PERMISSION_DISABLED','OFFLINE'].includes(String(status))) {
+        return json(response, 400, { code: 'INVALID_PUSH_SUBSCRIPTION' });
+      }
+      const saved = await authRuntime.pool.query(`INSERT INTO push_subscriptions(owner_id,transport,protected_endpoint_ref,status,device_label)
+        VALUES($1,$2,$3,$4,$5) ON CONFLICT(owner_id,protected_endpoint_ref) DO UPDATE SET transport=EXCLUDED.transport,status=EXCLUDED.status,
+          device_label=EXCLUDED.device_label,updated_at=now() RETURNING id,transport,status,device_label,created_at AS "createdAt"`,
+        [member.id,transport,endpointRef,status,label]);
+      return json(response, 201, { subscription: saved.rows[0] });
+    }
+
+    const pushDeleteMatch = url.pathname.match(/^\/api\/v1\/push-subscriptions\/([0-9a-f-]{36})$/i);
+    if (request.method === 'DELETE' && pushDeleteMatch) {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      const revoked = await authRuntime.pool.query(`UPDATE push_subscriptions SET status='REVOKED',updated_at=now()
+        WHERE owner_id=$1 AND id=$2 RETURNING id,status`, [member.id,pushDeleteMatch[1]]);
+      return revoked.rowCount ? json(response,200,{subscription:revoked.rows[0]}) : json(response,404,{code:'PUSH_SUBSCRIPTION_NOT_FOUND'});
+    }
+
+    const notificationDispatchMatch = url.pathname.match(/^\/api\/v1\/notifications\/([0-9a-f-]{36})\/dispatch$/i);
+    if (request.method === 'POST' && notificationDispatchMatch) {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      const input = await body(request); const fault = input['faultMode'];
+      const notification = await authRuntime.pool.query('SELECT id FROM notifications WHERE owner_id=$1 AND id=$2',[member.id,notificationDispatchMatch[1]]);
+      if (!notification.rowCount) return json(response,404,{code:'NOTIFICATION_NOT_FOUND'});
+      const db = await authRuntime.pool.connect();
+      try {
+        await db.query('BEGIN');
+        const subscriptions = await db.query<{id:string;transport:string;status:string}>(`SELECT id,transport,status FROM push_subscriptions
+          WHERE owner_id=$1 AND status<>'REVOKED' FOR UPDATE`,[member.id]);
+        const deliveries = [];
+        for (const subscription of subscriptions.rows) {
+          const key = `notify:${notificationDispatchMatch[1]}:${subscription.id}`;
+          let status = subscription.status === 'PERMISSION_DISABLED' ? 'SKIPPED_PERMISSION_DISABLED'
+            : subscription.status === 'OFFLINE' ? 'DEFERRED_OFFLINE'
+            : fault === 'TRANSPORT_TIMEOUT' ? 'FAILED' : 'SENT';
+          const errorText = status === 'FAILED' ? 'TRANSPORT_TIMEOUT' : status === 'DEFERRED_OFFLINE' ? 'DEVICE_OFFLINE'
+            : status === 'SKIPPED_PERMISSION_DISABLED' ? 'PERMISSION_DISABLED' : null;
+          const delivery = await db.query(`INSERT INTO notification_deliveries(owner_id,notification_id,subscription_id,stable_delivery_key,transport,status,attempts,next_retry_at,safe_error,sent_at)
+            VALUES($1,$2,$3,$4,$5,$6,1,CASE WHEN $6 IN ('FAILED','DEFERRED_OFFLINE') THEN now()+interval '1 minute' END,$7,CASE WHEN $6='SENT' THEN now() END)
+            ON CONFLICT(stable_delivery_key) DO UPDATE SET status=CASE WHEN notification_deliveries.status='ACKNOWLEDGED' THEN 'ACKNOWLEDGED' ELSE EXCLUDED.status END,
+              attempts=notification_deliveries.attempts+1,next_retry_at=EXCLUDED.next_retry_at,safe_error=EXCLUDED.safe_error,
+              sent_at=COALESCE(notification_deliveries.sent_at,EXCLUDED.sent_at),updated_at=now()
+            RETURNING id,status,attempts,stable_delivery_key AS "stableDeliveryKey"`,[member.id,notificationDispatchMatch[1],subscription.id,key,subscription.transport,status,errorText]);
+          deliveries.push(delivery.rows[0]);
+        }
+        await db.query('COMMIT');
+        return json(response,200,{deliveries,durableInbox:true,purchaseRepeated:false});
+      } catch(error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/v1/receipts') {
+      if (!authRuntime) return json(response,503,{code:'AUTH_UNAVAILABLE'});
+      const member = await resolveMember(authRuntime,request.headers); if (!member) return json(response,401,{code:'UNAUTHENTICATED'});
+      const result = await authRuntime.pool.query(`SELECT o.id AS "operationId",o.state,o.cancellation_state AS "cancellationState",
+          q.currency,q.total_minor::text AS "totalMinor",q.merchant_ref AS merchant,x.vendor_status AS "vendorStatus",
+          x.payment_status AS "paymentStatus",x.sanitized_receipt AS receipt,x.verified_at AS "verifiedAt"
+        FROM purchase_operations o JOIN external_orders x ON x.owner_id=o.owner_id AND x.operation_id=o.id
+        LEFT JOIN vendor_quotes q ON q.owner_id=o.owner_id AND q.id=o.selected_quote_id WHERE o.owner_id=$1 ORDER BY x.verified_at DESC LIMIT 100`,[member.id]);
+      return json(response,200,{receipts:result.rows.map((row)=>redactSensitivePayload(row))});
+    }
+    const receiptMatch = url.pathname.match(/^\/api\/v1\/receipts\/([0-9a-f-]{36})$/i);
+    if (request.method === 'GET' && receiptMatch) {
+      if (!authRuntime) return json(response,503,{code:'AUTH_UNAVAILABLE'});
+      const member = await resolveMember(authRuntime,request.headers); if (!member) return json(response,401,{code:'UNAUTHENTICATED'});
+      const receipt = await authRuntime.pool.query(`SELECT o.id AS "operationId",o.state,o.cancellation_state AS "cancellationState",
+          q.id AS "quoteId",q.currency,q.total_minor::text AS "totalMinor",q.merchant_ref AS merchant,
+          x.vendor_status AS "vendorStatus",x.payment_status AS "paymentStatus",x.sanitized_receipt AS receipt,
+          x.verified_at AS "verifiedAt",COALESCE((SELECT jsonb_agg(jsonb_build_object('status',r.status,'amountMinor',r.confirmed_amount_minor::text,'externalRef',r.external_ref) ORDER BY r.created_at)
+            FROM refunds r WHERE r.owner_id=o.owner_id AND r.operation_id=o.id),'[]'::jsonb) AS refunds,
+          COALESCE((SELECT jsonb_agg(jsonb_build_object('status',c.status,'stage',c.cancellation_stage,'reason',c.rejection_reason) ORDER BY c.requested_at)
+            FROM cancellations c WHERE c.owner_id=o.owner_id AND c.operation_id=o.id),'[]'::jsonb) AS cancellations
+        FROM purchase_operations o JOIN external_orders x ON x.owner_id=o.owner_id AND x.operation_id=o.id
+        LEFT JOIN vendor_quotes q ON q.owner_id=o.owner_id AND q.id=o.selected_quote_id WHERE o.owner_id=$1 AND o.id=$2`,[member.id,receiptMatch[1]]);
+      return receipt.rowCount ? json(response,200,{receipt:redactSensitivePayload(receipt.rows[0])}) : json(response,404,{code:'RECEIPT_NOT_FOUND'});
+    }
+
+    const cancelMatch = url.pathname.match(/^\/api\/v1\/operations\/([0-9a-f-]{36})\/cancel$/i);
+    if (request.method === 'POST' && cancelMatch) {
+      if (!authRuntime) return json(response,503,{code:'AUTH_UNAVAILABLE'});
+      const member = await resolveMember(authRuntime,request.headers); if (!member) return json(response,401,{code:'UNAUTHENTICATED'});
+      if (!originMatches(request.headers.origin)) return json(response,403,{code:'ORIGIN_NOT_ALLOWED'});
+      const input = await body(request); const modes: CancellationFaultMode[]=['CONFIRMED_NO_REFUND_YET','REJECTED_NON_CANCELLABLE','PENDING_VENDOR'];
+      const mode = modes.includes(input['faultMode'] as CancellationFaultMode) ? input['faultMode'] as CancellationFaultMode : 'CONFIRMED_NO_REFUND_YET';
+      const db = await authRuntime.pool.connect();
+      try { await db.query('BEGIN'); const result=await requestOperationCancellation(db,member.id,cancelMatch[1]!,mode); await db.query('COMMIT');
+        if(result['status']==='NOT_FOUND') return json(response,404,{code:'OPERATION_NOT_FOUND'});
+        if(result['status']==='UNSUPPORTED_ENVIRONMENT') return json(response,409,{code:'CANCELLATION_ADAPTER_UNAVAILABLE'});
+        return json(response,result['stage']==='PRE_DISPATCH'?200:202,{...result,fixtureOnly:true,liveExecutionEnabled:false});
+      } catch(error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/v1/operator/execution-switch') {
+      if (!authRuntime) return json(response,503,{code:'AUTH_UNAVAILABLE'});
+      const member=await resolveMember(authRuntime,request.headers); if(!member) return json(response,401,{code:'UNAUTHENTICATED'});
+      if(!isOperator(member)) return json(response,403,{code:'OPERATOR_REQUIRED'});
+      if(!originMatches(request.headers.origin)) return json(response,403,{code:'ORIGIN_NOT_ALLOWED'});
+      const input=await body(request); if(typeof input['newExecutionEnabled']!=='boolean'||typeof input['reason']!=='string'||input['reason'].trim().length<3) return json(response,400,{code:'INVALID_EXECUTION_CONTROL'});
+      const saved=await authRuntime.pool.query(`UPDATE runtime_execution_controls SET new_execution_enabled=$1,paused_reason=$2,updated_by=$3,updated_at=now()
+        WHERE singleton_key='GLOBAL' RETURNING new_execution_enabled AS "newExecutionEnabled",paused_reason AS reason,updated_at AS "updatedAt"`,[input['newExecutionEnabled'],input['newExecutionEnabled']?null:input['reason'].slice(0,240),member.id]);
+      await authRuntime.pool.query(`INSERT INTO audit_events(actor_type,actor_id,owner_id,action,new_state,safe_reason)
+        VALUES('OPERATOR',$1,$2,'EXECUTION_SWITCH_UPDATED',$3,$4)`,[member.authUserId,member.id,String(input['newExecutionEnabled']),input['reason'].slice(0,240)]);
+      return json(response,200,{control:saved.rows[0]});
+    }
+    const breakerMatch=url.pathname.match(/^\/api\/v1\/operator\/adapters\/([a-z0-9-]+)\/circuit-breaker$/i);
+    if(request.method==='POST'&&breakerMatch){
+      if(!authRuntime)return json(response,503,{code:'AUTH_UNAVAILABLE'}); const member=await resolveMember(authRuntime,request.headers); if(!member)return json(response,401,{code:'UNAUTHENTICATED'});
+      if(!isOperator(member))return json(response,403,{code:'OPERATOR_REQUIRED'});
+      if(!originMatches(request.headers.origin))return json(response,403,{code:'ORIGIN_NOT_ALLOWED'}); const input=await body(request);
+      if(!['OPEN','CLOSED'].includes(String(input['state']))||typeof input['reason']!=='string'||input['reason'].trim().length<3)return json(response,400,{code:'INVALID_CIRCUIT_BREAKER'});
+      const saved=await authRuntime.pool.query(`UPDATE vendor_adapters SET circuit_state=$2,circuit_reason=$3,circuit_opened_at=CASE WHEN $2='OPEN' THEN now() ELSE NULL END
+        WHERE adapter_key=$1 RETURNING adapter_key AS "adapterKey",environment,circuit_state AS state,circuit_reason AS reason`,[breakerMatch[1],input['state'],input['reason'].slice(0,240)]);
+      if(!saved.rowCount)return json(response,404,{code:'ADAPTER_NOT_FOUND'});
+      await authRuntime.pool.query(`INSERT INTO audit_events(actor_type,actor_id,owner_id,action,new_state,safe_reason)
+        VALUES('OPERATOR',$1,$2,'ADAPTER_CIRCUIT_UPDATED',$3,$4)`,[member.authUserId,member.id,`${breakerMatch[1]}:${String(input['state'])}`,input['reason'].slice(0,240)]);
+      return json(response,200,{adapter:saved.rows[0]});
+    }
+    if(request.method==='GET'&&url.pathname==='/api/v1/operator/recovery'){
+      if(!authRuntime)return json(response,503,{code:'AUTH_UNAVAILABLE'}); const member=await resolveMember(authRuntime,request.headers); if(!member)return json(response,401,{code:'UNAUTHENTICATED'});
+      if(!isOperator(member))return json(response,403,{code:'OPERATOR_REQUIRED'});
+      const [operations,reservations,adapters,control,jobs]=await Promise.all([
+        authRuntime.pool.query(`SELECT o.id AS "operationId",o.owner_id AS "ownerId",o.state,o.outcome_reason AS reason,o.updated_at AS "updatedAt" FROM purchase_operations o WHERE o.state IN ('SUBMITTING','RECONCILING','CANCEL_REQUESTED') ORDER BY o.updated_at LIMIT 100`),
+        authRuntime.pool.query(`SELECT owner_id AS "ownerId",operation_id AS "operationId",amount_minor::text AS "amountMinor",currency,status FROM budget_reservations WHERE status='ACTIVE' ORDER BY created_at LIMIT 100`),
+        authRuntime.pool.query(`SELECT adapter_key AS "adapterKey",environment,circuit_state AS "circuitState",circuit_reason AS reason FROM vendor_adapters WHERE circuit_state='OPEN'`),
+        authRuntime.pool.query(`SELECT new_execution_enabled AS "newExecutionEnabled",paused_reason AS reason,updated_at AS "updatedAt" FROM runtime_execution_controls WHERE singleton_key='GLOBAL'`),
+        authRuntime.pool.query(`SELECT id,owner_id AS "ownerId",job_type AS "jobType",state,last_error_code AS "lastErrorCode",attempts,updated_at AS "updatedAt" FROM jobs WHERE state IN ('BLOCKED','RETRY_WAIT') ORDER BY updated_at DESC LIMIT 100`),
+      ]);
+      const unknownLiabilityMinor=reservations.rows.reduce((sum,row)=>sum+BigInt(row['amountMinor'] as string),0n).toString();
+      return json(response,200,{operations:operations.rows,reservations:reservations.rows,unknownLiabilityMinor,openCircuitBreakers:adapters.rows,executionControl:control.rows[0]??null,jobs:jobs.rows});
     }
 
     if (request.method === 'GET' && url.pathname === '/api/v1/activity') {

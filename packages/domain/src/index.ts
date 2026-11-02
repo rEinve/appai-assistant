@@ -155,6 +155,47 @@ export function evaluateSpendingPolicy(input: SpendingPolicyEvaluationInput): Va
   return { valid: issues.length === 0, issues };
 }
 
+export function stableCancellationKey(operationId: string, permissionVersion: number): string {
+  return createHash('sha256').update(`cancel:${operationId}:${permissionVersion}`).digest('hex');
+}
+
+export function inspectUntrustedMerchantContent(input: unknown): {
+  safe: boolean; issues: ValidationIssue[]; sanitizedText: string;
+} {
+  const text = typeof input === 'string' ? input : JSON.stringify(input ?? '');
+  const issues: ValidationIssue[] = [];
+  const patterns: Array<[RegExp, string]> = [
+    [/ignore\s+(all\s+)?(previous|prior|above)\s+instructions?/i, 'PROMPT_INJECTION'],
+    [/(override|raise|increase|change)\s+(the\s+)?(budget|price|payee|recipient|spending)/i, 'AUTHORITY_ESCALATION'],
+    [/(system\s+prompt|pre[_ -]?approved|send\s+payment\s+to)/i, 'AUTHORITY_ESCALATION'],
+  ];
+  for (const [pattern, code] of patterns) if (pattern.test(text)) issues.push({ code, field: 'merchantContent', message: 'Untrusted merchant content contains an instruction or authority override.' });
+  const urls = text.match(/(?:https?|javascript|data|file|fixture):[^\s"'<>)}]+/gi) ?? [];
+  for (const raw of urls) {
+    try {
+      const url = new URL(raw);
+      const host = url.hostname.toLowerCase();
+      const privateHost = host === 'localhost' || host === '::1' || host === '127.0.0.1'
+        || /^10\./.test(host) || /^192\.168\./.test(host)
+        || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === '169.254.169.254';
+      if (url.protocol === 'fixture:') continue;
+      if (url.protocol !== 'https:' || privateHost) issues.push({ code: 'UNSAFE_MERCHANT_URL', field: 'merchantContent', message: 'Untrusted merchant content contains an unsafe URL.' });
+    } catch { issues.push({ code: 'UNSAFE_MERCHANT_URL', field: 'merchantContent', message: 'Untrusted merchant content contains an invalid URL.' }); }
+  }
+  return { safe: issues.length === 0, issues, sanitizedText: text.slice(0, 4000) };
+}
+
+export function redactSensitivePayload<T>(payload: T): T {
+  const secretKey = /(access[_-]?token|refresh[_-]?token|client[_-]?secret|authorization|cookie|password|raw[_-]?card|cvv|bearer|credential)/i;
+  const visit = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(visit);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) =>
+      [key, secretKey.test(key) ? '[REDACTED]' : visit(item)]));
+  };
+  return visit(payload) as T;
+}
+
 export function computeQuoteHash(quote: CanonicalQuoteInput): string {
   const canonicalize = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalize) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, canonicalize(child)])) : value;
   const canonical = JSON.stringify(canonicalize({ sourceQuoteKey: quote.sourceQuoteKey, subtotalMinor: quote.subtotalMinor, taxMinor: quote.taxMinor, shippingMinor: quote.shippingMinor, feesMinor: quote.feesMinor, discountMinor: quote.discountMinor, totalMinor: quote.totalMinor, currency: quote.currency, payee: quote.payee, terms: quote.terms }));

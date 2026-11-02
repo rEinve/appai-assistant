@@ -319,7 +319,9 @@ async function runPostgresMatrixTests() {
   const nextRunNYParts = localParts(nextRunDate, 'America/New_York');
   assert.equal(nextRunNYParts.hour, 0, `Next run must be at local midnight (hour 00), got ${nextRunNYParts.hour}`);
   assert.equal(nextRunNYParts.minute, 0, 'Next run must be at minute 00');
-  assert.equal(nextRunNYParts.day, pastMidnightParts.day, `Next run must preserve dayOfMonth (${pastMidnightParts.day})`);
+  const nextMonthDays = new Date(Date.UTC(nextRunNYParts.year, nextRunNYParts.month, 0)).getUTCDate();
+  assert.equal(nextRunNYParts.day, Math.min(pastMidnightParts.day, nextMonthDays),
+    `Next run must preserve the configured day with month-end clamping (${pastMidnightParts.day})`);
   console.log(`✓ Scenario A (DB): Worker advanced next_run_at to ${nextRunDate.toISOString()} (${nextRunNYParts.year}-${nextRunNYParts.month}-${nextRunNYParts.day} 00:00 America/New_York)`);
 
   // --------------------------------------------------------------------------
