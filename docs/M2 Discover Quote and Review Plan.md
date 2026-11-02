@@ -1,6 +1,6 @@
 # M2: Discover, Quote, and Review Plan — Implementation & Acceptance Specification
 
-Status: **Pass 2 remediation implemented and verified · provider execution remains disabled**
+Status: **GREEN-LIT (Chief Engineer Pass 3 Sign-Off · M2 Fixture & PostgreSQL Acceptance Verified · External Execution Disabled)**
 Date: **2 November 2026**  
 Scope: Milestone M2 (`AC-04`, `AC-05`, `AC-06`, `AC-11`, `FR-01`, `FR-02`, `FR-03`, `FR-04`, `FR-07`, `FR-11`, `FR-13`, `FR-17`, `FR-20`)  
 Authority: [Implementation Plan](A-P-P-A-I-agent-product-implementation-plan.md) (Milestone M2, Priority Correction), [PRD](A-P-P-A-I-agent-product-requirements-document.md) (§ 3, § 4), [Technical Requirements](A-P-P-A-I-agent-technical-requirements-document.md) (§ 2, § 3), [Schema](A-P-P-A-I-agent-schema.md) (§ 2, § 3), [Acceptance Matrix](DEVELOPMENT-ACCEPTANCE.md) (`AC-04`, `AC-05`, `AC-06`, `AC-11`), [Supplier Discovery Design](MEMBER-PROMPT-AND-SUPPLIER-DISCOVERY-DESIGN.md).
@@ -312,18 +312,30 @@ All five Pass 2 blockers are implemented and covered by the dedicated `npm run t
 
 These results verify the committed fixture implementation and local acceptance contracts. They do not establish provider-sourced quote normalization, validated live vendor/category coverage, or production checkout capability.
 
+### 4.5 Chief Engineer Pass 3 Audit & Final Sign-Off
+
+**Review Date**: 2 November 2026  
+**Verdict**: **GREEN-LIT (`AC-04`, `AC-05`, `AC-06`, `AC-11` Passed in Domain & PostgreSQL Fixture Mode; External Execution Disabled)**
+
+All 5 Pass 2 remediation items (`M2-R1` through `M2-R5`) were independently audited in code and verified against live local PostgreSQL (`127.0.0.1:5433`):
+- **`M2-R1` (`GET /api/v1/discovery/candidates`)**: Verified in `apps/api/src/server.ts` (lines 1300–1319) — `candidateById` Map deduplicates private suppliers that also appear in `budget_supplier_preferences`, promoting budget-preferred private suppliers (`confidenceScore: 0.85`, `tier: 'BUDGET_PREFERRED'`) ahead of unranked private history without duplicating entries in the top-3 shortlist.
+- **`M2-R2` (`POST /api/v1/instructions/:id/quotes`)**: Verified in `apps/api/src/server.ts` (lines 2017–2100) — owner-scoped, idempotent route rejects `SEARCH_SNIPPET` / `ESTIMATE` / `ADVERTISED_OFFER` / `STALE_STOCK` (`422 NON_AUTHORITATIVE_DISCOVERY_EVIDENCE`), enforces `validateProductCriteria` / `validateBillCriteria` / `validateAccommodationCriteria` plus instruction constraint matching (`422 CATEGORY_CRITERIA_MISMATCH`), reconciles exact minor-unit components (`422 UNRECONCILED_QUOTE_ARITHMETIC`, `422 CURRENCY_MISMATCH`), enforces `max_total_minor` (`422 QUOTE_EXCEEDS_MAX_TOTAL`), and persists immutable `vendor_quotes` with canonical `computeQuoteHash`.
+- **`M2-R3` (`processObservation` & `processOccurrence`)**: Verified in `apps/worker/src/worker.ts` (lines 419–447, 532–647) — supports `WATCH` instructions across `NOTIFY_ONLY`, `REVIEW_REQUIRED`, and `PRE_APPROVED` with `ONCE` or `INTERVAL` polling; non-matching watch observations log `WATCH_NO_MATCH_CONTINUING` and advance `next_run_at` without creating operations/quotes/approvals; matching `REVIEW_REQUIRED` watches (Arusha stay) create 1 `FIXTURE_AWAITING_REVIEW` operation, 1 quote, and 1 `PENDING` approval; `PRE_APPROVED` quotes above `softReviewThresholdMinor` route to `FIXTURE_AWAITING_REVIEW`.
+- **`M2-R4` (`GET /api/v1/approvals/:id` & `POST /api/v1/approvals/:id/decide`)**: Verified in `apps/api/src/server.ts` (lines 2137–2270) — joins `vendor_quote_lifecycle`, blocks invalidated quotes or bumped `permission_version` with `409 STALE_AGREEMENT_VERSION`, blocks expired quotes/approvals with `410 APPROVAL_EXPIRED_OR_DECIDED`, and enforces single-winner concurrency under `FOR UPDATE OF a, o`.
+- **`M2-R5` (`npm run test:m2`)**: Verified live execution of `npm run test:m2` (`8/8` domain tests + full PostgreSQL M1/M2 workflow), `npm run test:m0`, `npm run test:ac03`, `npm run test:auth`, `npm run test:paypal` (`3/3`), `npm run test:acceptance` (`101/101`), and `npm run build` (`0` errors).
+
 ---
 
 ## 5. Verification & Exit Checklist
 
-| Checkpoint | Target Contract | Verification Suite / Evidence |
-| :--- | :--- | :--- |
-| **AC-04 Pass** | Category constraints strictly validated; incorrect/ambiguous candidates never quote; no-match watches continue | `npm run test:m2` + `npm run test:domain` |
-| **AC-05 Pass** | Exact minor-unit arithmetic; cryptographic quote hash; search snippets alone cannot purchase | `npm run test:m2` + `packages/domain/test/domain.test.js` |
-| **AC-06 Pass** | Review-required match creates pending approval; pre-approved executes only within scope & soft threshold; notify-only never purchases | `npm run test:m2` + `npm run test:acceptance` |
-| **AC-11 Pass** | Material scope change invalidates consent; opening notification/modal is read-only; concurrent race & replay rejected | `npm run test:m2` + `npm run test:acceptance` (Suite C16) |
-| **Private Isolation** | Cross-member discovery or supplier leak strictly returns 404/403; no duplicate supplier in top-3 shortlist | PostgreSQL isolation queries in `test-m2-discovery-quote-workflow.mjs` |
-| **Full Regression** | Zero regressions across M0, M1, and web build | `npm run test:m0`, `test:ac03`, `test:m1:workflow`, `test:auth`, `npm run build` |
+| Checkpoint | Target Contract | Verification Suite / Evidence | Status |
+| :--- | :--- | :--- | :--- |
+| **AC-04 Pass** | Category constraints strictly validated; incorrect/ambiguous candidates never quote; no-match watches continue | `npm run test:m2` + `npm run test:domain` | **PASSED (Fixture/DB)** |
+| **AC-05 Pass** | Exact minor-unit arithmetic; cryptographic quote hash; search snippets alone cannot purchase | `npm run test:m2` + `packages/domain/test/domain.test.js` | **PASSED (Fixture/DB)** |
+| **AC-06 Pass** | Review-required match creates pending approval; pre-approved executes only within scope & soft threshold; notify-only never purchases | `npm run test:m2` + `npm run test:acceptance` | **PASSED (Fixture/DB)** |
+| **AC-11 Pass** | Material scope change invalidates consent; opening notification/modal is read-only; concurrent race & replay rejected | `npm run test:m2` + `npm run test:acceptance` (Suite C16) | **PASSED (Fixture/DB)** |
+| **Private Isolation** | Cross-member discovery or supplier leak strictly returns 404/403; no duplicate supplier in top-3 shortlist | PostgreSQL isolation queries in `test-m2-discovery-quote-workflow.mjs` | **PASSED (DB)** |
+| **Full Regression** | Zero regressions across M0, M1, and web build | `npm run test:m0`, `test:ac03`, `test:m1:workflow`, `test:auth`, `npm run build` | **PASSED** |
 
 ---
 
@@ -333,4 +345,4 @@ Per [`AGENTS.md`](../AGENTS.md):
 > **Mandatory Collaboration Lifecycle**: Always follow **Problem → Solution → Plan → Signed → Implementation**.
 > Halt and wait for user sign-off ("signed" / "proceed") before applying modifications.
 
-**Pass 2 remediation hand-off**: M2-R1 through M2-R5 were implemented and verified as recorded in § 4.3. M2 remains fixture-verified with external execution disabled; provider-sourced quote capability and production gates remain open.
+**Milestone M2 Sign-Off**: **GREEN-LIT** (2 November 2026). Ready to advance to **Milestone M3** planning and review.
