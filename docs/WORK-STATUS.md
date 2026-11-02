@@ -74,7 +74,7 @@ The member area supports invite-only sign-in, prompt-first instruction drafts, a
 - API routes provide durable owner-scoped inbox delivery, receipts, cancellation, and operator recovery. Operator controls require configured member ID or email allowlists. Cancellation and notification provider behavior remains deterministic local-fixture simulation.
 - Worker cancellation reconciliation runs while execution is paused. New `PRE_APPROVED` worker occurrences check the global switch and adapter circuit before creating purchase operations; dispatch preparation checks them again. Worker shutdown drains active work before closing its database pool.
 - **Verification, 2 November 2026:** `npm run test:m4` passed (domain 11/11, API/worker builds, local PostgreSQL acceptance). Full regression passed: `test:m0`, `test:ac03`, `test:m2` (including M1 fixture workflow), `test:m3`, `test:auth`, `test:paypal` (3/3), `test:acceptance` (101/101), and `npm run build`. The AC-03 month-end assertion was corrected to expect valid month-end clamping and passed. Local fixture results are not evidence of real push, provider cancellation, sandbox checkout, or live execution. See the [M4 implementation and acceptance report](M4%20Mobile%20Control%20Cancellation%20and%20Operational%20Recovery%20Plan.md).
-- **Checkpoint:** pending commit creation in this closeout.
+- **Implementation checkpoint:** commit `b6c2844` (`Implement M4 mobile controls and operational recovery`) on `main`, with the required `Co-Authored-By` attribution. This log update is a separate documentation follow-up.
 
 ## Next acceptance and implementation sequence (M5)
 
