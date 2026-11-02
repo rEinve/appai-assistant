@@ -152,3 +152,14 @@ M5 implementation and local PostgreSQL acceptance are GREEN-LIT. The full eviden
 - Full database `pg_dump`/`pg_restore` rehearsal passed in a temporary database. Purchase operation, active reservation, attempt, outbox and idempotency record counts matched the source; the temporary database and dump were removed.
 - Regression passed: `npm run test:m0`, `test:ac03`, `test:m2`, `test:m3`, `test:m4`, `test:auth`, `test:paypal` (3/3), `test:acceptance` (101/101), and `npm run build`. The first M3 attempt timed out once during lost-response recovery; the M3 rerun passed.
 - Evidence environment: local PostgreSQL `appai_dev`, deterministic local fixture adapter, no live execution. This does not prove production TLS, email delivery/recovery, real push delivery, vendor cancellation, live checkout, or live payment capability.
+
+## 7. Read-Only Tunnel Smoke Check — 2 November 2026
+
+The owner-provided tunnel `https://appai.themeshak.com/` was checked in Chrome and with unauthenticated HTTPS requests. No credentials were entered and no payment, account, or other state-changing action was submitted.
+
+- Public landing page and JavaScript asset loaded successfully (`200`). The public fixture workspace opened; Home, Planner, Settings, Inbox, and the offer review screen rendered with demo member Leah Morgan, fixture budget data, and a PayPal Sandbox label. Testing stopped at the authorization screen.
+- `GET /api/v1/me` returned `401 UNAUTHENTICATED`, as expected without a session.
+- The committed M5 `GET /api/v1/operator/pilot-readiness` and `GET /api/v1/budget-policies` routes returned `404 NOT_FOUND` instead of reaching their authentication gates (`401`). `GET /health` returned the SPA HTML rather than API health JSON.
+- CORS preflight succeeded (`204`) but its `Access-Control-Allow-Headers` omitted `X-Require-Step-Up`.
+
+These API and CORS responses do not match M5 checkpoint `5c9000b`; the frontend tunnel is reachable, but the API behind it needs the M5 build and migration 018 before M5 can be tested end-to-end there. This is an inference from the observed route and header differences. The M5 acceptance evidence above remains local PostgreSQL/fixture evidence until the tunnel API is updated and authenticated checks are repeated.
