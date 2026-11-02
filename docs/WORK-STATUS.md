@@ -61,7 +61,7 @@ The member area supports invite-only sign-in, prompt-first instruction drafts, a
 - The Domain, API, and Worker enforce hard caps independently of approval, fence policy changes, reserve shared capacity under database locks, persist a stable request key before execution, hold unknown or partial outcomes for reconciliation, and restore budget only for confirmed refunds. Local dispatch requires explicit `APPAI_EXECUTION_MODE=local-sandbox`; the API continues to report `liveExecutionEnabled: false`.
 - **Verification, 2 November 2026:** `npm run test:m3` passed (domain 9/9, API/worker builds, PostgreSQL M3 acceptance). `npm run test:m0`, `npm run test:m2` (including M1 fixture workflow), `npm run test:ac03`, `npm run test:auth`, `npm run test:paypal` (3/3), `npm run test:acceptance` (101/101), and `npm run build` also passed. PostgreSQL suites used local `127.0.0.1:5433`; execution evidence is deterministic fixture-only. Full details are in [M3 implementation and acceptance report](M3%20Atomic%20Reservations%20and%20Safe%20Sandbox%20Execution%20Plan.md).
 - M0 regression found and fixed during verification: legacy fixture `RECONCILE` jobs without an operation ID now retain their prior completion behavior, while operation-backed M3 reconciliation uses the stable key. M0 rerun passed.
-- **Checkpoint:** pending commit creation in this closeout; commit hash will be recorded here after the signed M3 files are committed on `main`.
+- **Implementation checkpoint:** commit `260d1b9` (`Implement M3 atomic reservations and safe sandbox execution`) on `main`, with the required `Co-Authored-By` attribution. The dated report and this hash record are a separate documentation follow-up.
 
 ## Next acceptance and implementation sequence (M4)
 
