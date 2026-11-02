@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export type PermissionMode = 'PRE_APPROVED' | 'REVIEW_REQUIRED' | 'NOTIFY_ONLY';
 export type InstructionKind = 'ONE_TIME' | 'SCHEDULED' | 'RECURRING_BILL' | 'WATCH';
 export type Category = 'PRODUCT' | 'BILL' | 'ACCOMMODATION';
@@ -51,6 +53,50 @@ export interface QuoteAmounts {
   quantity: number;
 }
 
+export interface CategoryValidationResult<T> {
+  valid: boolean;
+  value?: T;
+  issues: ValidationIssue[];
+}
+
+export interface ProductDetails { variant: string; quantity: number; deliveryWindow: string; returnPolicy: string; sellerReputation?: string }
+export interface BillDetails { payeeName: string; accountRef: string; invoiceRef: string; billingCycle: string; unpaidStatus: 'UNPAID' }
+export interface AccommodationDetails { destination: string; checkIn: string; checkOut: string; guests: number; rooms: number; rateType: string; cancellationTerms: string }
+
+function validateRecord<T>(details: unknown, fields: Record<string, (value: unknown) => boolean>, makeValue: (record: Record<string, unknown>) => T): CategoryValidationResult<T> {
+  const record = details && typeof details === 'object' && !Array.isArray(details) ? details as Record<string, unknown> : {};
+  const issues = Object.entries(fields).flatMap(([field, check]) => check(record[field]) ? [] : [issue('INVALID_CATEGORY_DETAILS', field, `${field} is missing or invalid.`)]);
+  return issues.length ? { valid: false, issues } : { valid: true, value: makeValue(record), issues };
+}
+
+const text = (value: unknown): value is string => nonEmpty(value);
+const count = (value: unknown): value is number => positiveInteger(value);
+const isoDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+
+export function validateProductCriteria(details: unknown): CategoryValidationResult<ProductDetails> {
+  return validateRecord(details, { variant: text, quantity: count, deliveryWindow: text, returnPolicy: text }, r => ({ variant: String(r['variant']).trim(), quantity: r['quantity'] as number, deliveryWindow: String(r['deliveryWindow']).trim(), returnPolicy: String(r['returnPolicy']).trim(), ...(text(r['sellerReputation']) ? { sellerReputation: r['sellerReputation'].trim() } : {}) }));
+}
+export function validateBillCriteria(details: unknown): CategoryValidationResult<BillDetails> {
+  return validateRecord(details, { payeeName: text, accountRef: text, invoiceRef: text, billingCycle: v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v), unpaidStatus: v => v === 'UNPAID' }, r => ({ payeeName: String(r['payeeName']).trim(), accountRef: String(r['accountRef']).trim(), invoiceRef: String(r['invoiceRef']).trim(), billingCycle: String(r['billingCycle']), unpaidStatus: 'UNPAID' }));
+}
+export function validateAccommodationCriteria(details: unknown): CategoryValidationResult<AccommodationDetails> {
+  const result = validateRecord(details, { destination: text, checkIn: isoDate, checkOut: isoDate, guests: count, rooms: count, rateType: text, cancellationTerms: text }, r => ({ destination: String(r['destination']).trim(), checkIn: String(r['checkIn']), checkOut: String(r['checkOut']), guests: r['guests'] as number, rooms: r['rooms'] as number, rateType: String(r['rateType']).trim(), cancellationTerms: String(r['cancellationTerms']).trim() }));
+  if (result.valid && result.value && result.value.checkOut <= result.value.checkIn) return { valid: false, issues: [issue('INVALID_DATE_RANGE', 'checkOut', 'Check-out must be after check-in.')] };
+  return result;
+}
+
+export interface CanonicalQuoteInput { sourceQuoteKey: string; subtotalMinor: string; taxMinor: string; shippingMinor: string; feesMinor: string; discountMinor: string; totalMinor: string; currency: string; payee: string; terms: unknown }
+export function reconcileQuoteTotals(quote: CanonicalQuoteInput, expectedCurrency?: string): ValidationResult {
+  const amounts: QuoteAmounts = { subtotalMinor: quote.subtotalMinor, taxMinor: quote.taxMinor, shippingMinor: quote.shippingMinor, feesMinor: quote.feesMinor, discountMinor: quote.discountMinor, totalMinor: quote.totalMinor, currency: quote.currency, quantity: 1 };
+  const issues = validateQuoteAmounts(amounts).issues.map(i => ({ ...i, code: i.code === 'MONEY_MISMATCH' ? 'UNRECONCILED_QUOTE_ARITHMETIC' : i.code }));
+  if (expectedCurrency && quote.currency !== expectedCurrency) issues.push(issue('CURRENCY_MISMATCH', 'currency', 'Quote currency must match the instruction and budget.'));
+  return { valid: issues.length === 0, issues };
+}
+export function computeQuoteHash(quote: CanonicalQuoteInput): string {
+  const canonicalize = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalize) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, canonicalize(child)])) : value;
+  const canonical = JSON.stringify(canonicalize({ sourceQuoteKey: quote.sourceQuoteKey, subtotalMinor: quote.subtotalMinor, taxMinor: quote.taxMinor, shippingMinor: quote.shippingMinor, feesMinor: quote.feesMinor, discountMinor: quote.discountMinor, totalMinor: quote.totalMinor, currency: quote.currency, payee: quote.payee, terms: quote.terms }));
+  return createHash('sha256').update(canonical).digest('hex');
+}
 export class DomainError extends Error {
   constructor(public readonly code: string, message: string) {
     super(message);

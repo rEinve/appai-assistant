@@ -36,7 +36,7 @@ To try the optional **Ask assistant** draft-refinement step, set `GOOGLE_KEY` in
 
 For optional read-only web search in Instructions, set `searchProvider=serper` and `serperApiKey` in the private `.env`, then restart the API. The member enters and submits search terms explicitly. Results are unverified links, never quotes or proof that a supplier can accept payment. `npm run test:search:live` checks the authenticated route with a synthetic query and temporary member; it passed with the corrected local key.
 
-For the PayPal Developer sandbox, create a sandbox REST app and set `PAYPAL_DEMO_MODE=sandbox`, `PAYPAL_CLIENT_ID`, and `PAYPAL_CLIENT_SECRET` in the private `.env`. Run `npm run test:paypal:sandbox` to create a USD 1.00 synthetic order and read its status back. The test does not approve or capture the order. Keep `PAYPAL_DEMO_MODE=fixture` until the sandbox capability and buyer approval path have been reviewed.
+For PayPal sandbox checkout testing, use a PayPal Developer **Business** sandbox account for the REST app credentials and a separate **Personal** sandbox account as the demo customer. Set `PAYPAL_DEMO_MODE=sandbox`, `PAYPAL_CLIENT_ID`, and `PAYPAL_CLIENT_SECRET` in the private `.env`. Run `npm run test:paypal:sandbox` to create a USD 1.00 synthetic order and print its buyer approval link. Sign in to that link with the Personal sandbox account. After approval, explicitly capture the sandbox order with `npm run test:paypal:sandbox -- --capture=ORDER_ID`; this uses sandbox funds only. To inspect an existing order and recover its approval link, run `npm run test:paypal:sandbox -- --order=ORDER_ID`. The normal fixture mode never contacts PayPal. Do not use live credentials for these commands.
 
 ## Development commands
 

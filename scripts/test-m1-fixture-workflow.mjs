@@ -231,6 +231,12 @@ async function main() {
     assert.equal(ownerSupplierList.json.mySuppliers.some((supplier) => supplier.privateNotes === 'Other-member private note'), false, 'owner cannot read another member private notes');
     assert.deepEqual(otherSupplierList.json.mySuppliers.map((supplier) => supplier.id), [otherSupplierId], 'other member sees only their private suppliers');
     assert.equal(otherSupplierList.json.mySuppliers.some((supplier) => supplier.id === ownerSupplierOneId || supplier.id === ownerSupplierTwoId), false, 'other member cannot read owner suppliers');
+    const rankedCandidates = await request('/api/v1/discovery/candidates?category=PRODUCT&area=Arusha', { cookie: owner.cookie });
+    assert.equal(rankedCandidates.response.status, 200, `ranked discovery: ${JSON.stringify(rankedCandidates.json)}`);
+    assert.ok(rankedCandidates.json.candidates.length <= 3, 'discovery shortlist is capped at three');
+    assert.equal(rankedCandidates.json.candidates[0].id, ownerSupplierOneId, 'private member history ranks first');
+    assert.equal(rankedCandidates.json.candidates.some((candidate) => candidate.id === otherSupplierId), false, 'discovery does not leak another member supplier');
+    assert.equal(rankedCandidates.json.candidates[0].verifiedPaypalSupport, false, 'supplier history is not misrepresented as PayPal verification');
 
     const preferencePath = `/api/v1/budgets/${budgetId}/suppliers`;
     const savePreferences = async (cookie, supplierIds, key = randomUUID(), path = preferencePath) => request(path, {
@@ -399,6 +405,10 @@ async function main() {
     assert.equal(operation.state, 'FIXTURE_AWAITING_REVIEW');
     assert.match(operation.quoteDetails.label, /not a real offer/i);
     assert.equal(operation.approvalStatus, 'PENDING');
+    const approvalRead = await request(`/api/v1/approvals/${approvalId}`, { cookie: owner.cookie });
+    assert.equal(approvalRead.response.status, 200, 'approval details are available through the read-only endpoint');
+    assert.equal(approvalRead.json.readOnly, true, 'approval details endpoint declares its read-only behavior');
+    assert.equal(approvalRead.json.approval.status, 'PENDING', 'opening approval details does not change pending state');
     const hiddenApproval = await request(`/api/v1/approvals/${approvalId}/fixture-decision`, {
       method: 'POST', cookie: other.cookie,
       headers: { 'Idempotency-Key': randomUUID(), 'If-Match': '"1"' }, body: { decision: 'APPROVE' },

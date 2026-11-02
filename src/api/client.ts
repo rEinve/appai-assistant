@@ -100,6 +100,20 @@ export interface ApiPrivateSupplier {
   version: number | string
 }
 
+export interface ApiDiscoveryCandidate {
+  id: string
+  name: string
+  tier: "PRIVATE_HISTORY" | "BUDGET_PREFERRED" | "CATALOGUE" | "WEB_RESEARCH"
+  category: string
+  serviceAreas?: string[]
+  sourceUrl?: string
+  provenance: string
+  freshnessTimestamp: string
+  verifiedPaypalSupport: boolean
+  confidenceScore: number
+  notes?: string
+}
+
 class ApiClient {
   private baseUrl = ""
 
@@ -138,6 +152,13 @@ class ApiClient {
     }
 
     return response.json() as Promise<T>
+  }
+
+  async getDiscoveryCandidates(input: { instructionId?: string; category?: string; area?: string; query?: string }): Promise<ApiDiscoveryCandidate[]> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(input)) if (value) params.set(key, value)
+    const result = await this.request<{ candidates: ApiDiscoveryCandidate[] }>(`/api/v1/discovery/candidates?${params.toString()}`, { method: "GET" })
+    return result.candidates || []
   }
 
   // --- Auth Endpoints ---

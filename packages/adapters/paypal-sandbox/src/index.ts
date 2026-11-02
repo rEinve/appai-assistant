@@ -182,10 +182,11 @@ export class PayPalSandboxClient {
 
   async getOrder(orderId: string): Promise<PayPalOrderResult> {
     assertPayPalOperationSupported('GET_ORDER');
-    const body = await this.request<{ id: string; status: string }>('/v2/checkout/orders/' + encodeURIComponent(orderId));
+    const body = await this.request<{ id: string; status: string; links?: Array<{ rel: string; href: string }> }>('/v2/checkout/orders/' + encodeURIComponent(orderId));
     return {
       id: body.id,
       status: body.status,
+      approvalUrl: body.links?.find((link) => link.rel === 'approve')?.href,
       roles: {
         buyerRole: PAYPAL_M0_CAPABILITY.buyerRole,
         callerRole: PAYPAL_M0_CAPABILITY.callerRole,

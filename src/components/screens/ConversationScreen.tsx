@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Icon, Button, BrandMark } from "../common/CommonUI"
 import type { AppaiStoreType } from "../../store/appaiStore"
-import type { AuthorityMode } from "../../types/appai"
+import type { AuthorityMode, CandidateSupplier } from "../../types/appai"
+import { api } from "../../api/client"
 
 export type EvidenceType = "ADVERTISED_OFFER" | "ESTIMATE" | "AUTHORITATIVE_QUOTE"
 
@@ -97,6 +98,7 @@ export function ConversationScreen({
     existingInst ? existingInst.priceCeiling : 450,
   )
   const [isTyping, setIsTyping] = useState(false)
+  const [supplierCandidates, setSupplierCandidates] = useState<CandidateSupplier[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedRef = useRef<string>("")
@@ -194,6 +196,17 @@ export function ConversationScreen({
       isCurrent = false
     }
   }, [editingInstructionId, store])
+
+  useEffect(() => {
+    if (!editingInstructionId) return
+    let current = true
+    api.getDiscoveryCandidates({ instructionId: editingInstructionId }).then((candidates) => {
+      if (current) setSupplierCandidates(candidates)
+    }).catch(() => {
+      if (current) setSupplierCandidates([])
+    })
+    return () => { current = false }
+  }, [editingInstructionId])
 
   // Scroll to bottom on updates with reduced-motion support
   useEffect(() => {
@@ -1191,6 +1204,28 @@ export function ConversationScreen({
           </div>
 
           <div className="conversation__stream" role="log" aria-live="polite">
+            {supplierCandidates.length > 0 && (
+              <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="Supplier candidates">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600">Ranked supplier candidates</h3>
+                  <span className="text-[10px] text-slate-500">Discovery only · no verified quote</span>
+                </div>
+                <div className="space-y-2">
+                  {supplierCandidates.slice(0, 3).map((candidate) => (
+                    <article key={candidate.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          {candidate.sourceUrl ? <a href={candidate.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-indigo-900 underline">{candidate.name}</a> : <p className="text-sm font-semibold text-slate-900">{candidate.name}</p>}
+                          <p className="mt-1 text-xs text-slate-600">{candidate.provenance}</p>
+                          {candidate.notes && <p className="mt-1 text-xs text-slate-500">{candidate.notes}</p>}
+                        </div>
+                        <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600">{candidate.tier.replaceAll("_", " ")}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
             {messages.map((message) => (
               <div
                 key={message.id}

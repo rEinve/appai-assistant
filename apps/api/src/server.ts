@@ -911,6 +911,10 @@ Suggestions require member review and never authorize a purchase or schedule.` }
              AND operation_id IN (SELECT id FROM purchase_operations WHERE instruction_id = $2 AND owner_id = $1)`,
           [member.id, instructionId],
         );
+        await db.query(`UPDATE vendor_quote_lifecycle SET state = 'INVALIDATED', changed_at = now()
+          WHERE owner_id = $1 AND state = 'ACTIVE' AND quote_id IN (
+            SELECT selected_quote_id FROM purchase_operations WHERE owner_id = $1 AND instruction_id = $2 AND selected_quote_id IS NOT NULL
+          )`, [member.id, instructionId]);
 
         await db.query('COMMIT');
         return json(response, 200, {
@@ -1079,6 +1083,10 @@ Suggestions require member review and never authorize a purchase or schedule.` }
                AND operation_id IN (SELECT id FROM purchase_operations WHERE instruction_id = $2 AND owner_id = $1)`,
             [member.id, configurationMatch[1]],
           );
+          await db.query(`UPDATE vendor_quote_lifecycle SET state = 'INVALIDATED', changed_at = now()
+            WHERE owner_id = $1 AND state = 'ACTIVE' AND quote_id IN (
+              SELECT selected_quote_id FROM purchase_operations WHERE owner_id = $1 AND instruction_id = $2 AND selected_quote_id IS NOT NULL
+            )`, [member.id, configurationMatch[1]]);
         }
         await db.query(
           `INSERT INTO audit_events (actor_type, actor_id, owner_id, instruction_id, action, old_state, new_state)
@@ -1221,6 +1229,75 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       } finally {
         db.release();
       }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/v1/discovery/candidates') {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const instructionId = url.searchParams.get('instructionId');
+      let category = url.searchParams.get('category')?.toUpperCase() ?? '';
+      let area = url.searchParams.get('area')?.trim() ?? '';
+      let budgetId: string | null = null;
+      if (instructionId) {
+        const instruction = await authRuntime.pool.query<{ category: string; budgetId: string | null; area: string | null }>(
+          `SELECT category, budget_id AS "budgetId", COALESCE(structured_constraints->>'area', structured_constraints->>'serviceArea') AS area
+           FROM procurement_instructions WHERE id = $1 AND owner_id = $2`, [instructionId, member.id],
+        );
+        if (!instruction.rowCount) return json(response, 404, { code: 'INSTRUCTION_NOT_FOUND' });
+        category = instruction.rows[0]!.category;
+        budgetId = instruction.rows[0]!.budgetId;
+        area ||= instruction.rows[0]!.area ?? '';
+      }
+      if (!['PRODUCT', 'BILL', 'ACCOMMODATION'].includes(category)) return json(response, 400, { code: 'CATEGORY_REQUIRED' });
+      const [privateCandidates, preferredCandidates, catalogueCandidates] = await Promise.all([
+        authRuntime.pool.query(`SELECT s.id, s.private_name AS name, s.service_areas AS "serviceAreas", s.private_notes AS notes,
+            s.last_confirmed_use_at AS "freshnessTimestamp", s.categories, 'PRIVATE_HISTORY' AS tier
+          FROM member_suppliers s WHERE s.owner_id = $1 AND $2 = ANY(s.categories)
+            AND ($3 = '' OR cardinality(s.service_areas) = 0 OR EXISTS (SELECT 1 FROM unnest(s.service_areas) a WHERE lower(a) = lower($3)))
+          ORDER BY s.last_confirmed_use_at DESC NULLS LAST, s.created_at DESC LIMIT 20`, [member.id, category, area]),
+        budgetId ? authRuntime.pool.query(`SELECT s.id, s.private_name AS name, s.service_areas AS "serviceAreas", s.private_notes AS notes,
+            s.last_confirmed_use_at AS "freshnessTimestamp", s.categories, 'BUDGET_PREFERRED' AS tier, p.preference_rank AS rank
+          FROM budget_supplier_preferences p JOIN member_suppliers s ON s.id = p.member_supplier_id AND s.owner_id = p.owner_id
+          WHERE p.owner_id = $1 AND p.budget_id = $2 AND $3 = ANY(s.categories)
+          ORDER BY p.preference_rank LIMIT 20`, [member.id, budgetId, category]) : Promise.resolve({ rows: [] }),
+        authRuntime.pool.query(`SELECT id, canonical_name AS name, service_areas AS "serviceAreas", source_evidence AS notes,
+            source_checked_at AS "freshnessTimestamp", categories, 'CATALOGUE' AS tier
+          FROM supplier_catalogue WHERE active = true AND discovery_status = 'SUPPORTED' AND $1 = ANY(categories)
+            AND ($2 = '' OR cardinality(service_areas) = 0 OR EXISTS (SELECT 1 FROM unnest(service_areas) a WHERE lower(a) = lower($2)))
+          ORDER BY source_checked_at DESC NULLS LAST, canonical_name LIMIT 20`, [category, area]),
+      ]);
+      const fetchedAt = new Date().toISOString();
+      const ranked: Array<Record<string, unknown>> = [
+        ...privateCandidates.rows.map((r: Record<string, unknown>) => ({ ...r, verifiedPaypalSupport: false, confidenceScore: 0.8, provenance: 'Member private supplier record' })),
+        ...preferredCandidates.rows.map((r: Record<string, unknown>) => ({ ...r, verifiedPaypalSupport: false, confidenceScore: 0.85, provenance: 'Budget preference' })),
+        ...catalogueCandidates.rows.map((r: Record<string, unknown>) => ({ ...r, verifiedPaypalSupport: false, confidenceScore: 0.7, provenance: 'Verified catalogue record' })),
+      ].slice(0, 3);
+      const searchQuery = url.searchParams.get('query')?.trim() ?? '';
+      const providerKey = process.env['serperApiKey']?.trim() || process.env['SERPER_API_KEY']?.trim();
+      if (searchQuery.length >= 3 && searchQuery.length <= 160 && providerKey && ranked.length < 3
+          && (process.env['searchProvider'] || process.env['SEARCH_PROVIDER'])?.toLowerCase() === 'serper') {
+        const now = Date.now();
+        const recent = (searchRequests.get(member.id) ?? []).filter((time) => now - time < 60_000);
+        if (recent.length < 6) {
+          searchRequests.set(member.id, [...recent, now]);
+          try {
+            const search = await fetch('https://google.serper.dev/search', { method: 'POST', headers: { 'X-API-KEY': providerKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ q: searchQuery, num: 3 }), signal: AbortSignal.timeout(12_000) });
+            if (search.ok) {
+              const data = await search.json() as { organic?: Array<{ title?: unknown; link?: unknown; snippet?: unknown }> };
+              for (const item of data.organic ?? []) {
+                if (ranked.length >= 3 || typeof item.title !== 'string' || typeof item.link !== 'string') break;
+                try {
+                  const link = new URL(item.link);
+                  if (link.protocol !== 'https:' && link.protocol !== 'http:') continue;
+                  ranked.push({ id: `web:${link.toString()}`, name: item.title.slice(0, 200), tier: 'WEB_RESEARCH', category, sourceUrl: link.toString(), notes: typeof item.snippet === 'string' ? item.snippet.slice(0, 500) : '', provenance: 'Read-only Serper result; supplier and payment support unverified', freshnessTimestamp: fetchedAt, verifiedPaypalSupport: false, confidenceScore: 0.2 });
+                } catch { /* Ignore malformed provider URLs. */ }
+              }
+            }
+          } catch { /* Discovery remains available when optional search is unavailable. */ }
+        }
+      }
+      return json(response, 200, { category, area: area || null, fetchedAt, candidates: ranked.map((candidate) => { const row = candidate as Record<string, unknown>; return { ...row, freshnessTimestamp: row['freshnessTimestamp'] ?? fetchedAt }; }), externalExecutionEnabled: false });
     }
 
     if (url.pathname === '/api/v1/suppliers' && request.method === 'GET') {
@@ -1928,6 +2005,29 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       ]);
       return json(response, 200, { operations: operations.rows, notifications: notifications.rows, observations: observations.rows });
     }
+    const approvalReadMatch = url.pathname.match(/^\/api\/v1\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+    if (request.method === 'GET' && approvalReadMatch) {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      const result = await authRuntime.pool.query(
+        `SELECT a.id AS "approvalId", a.status, a.version, a.permission_version AS "permissionVersion", a.expires_at AS "expiresAt",
+                q.id AS "quoteId", q.content_hash AS "quoteHash", q.currency, q.subtotal_minor::text AS "subtotalMinor",
+                q.tax_minor::text AS "taxMinor", q.shipping_minor::text AS "shippingMinor", q.fees_minor::text AS "feesMinor",
+                q.discount_minor::text AS "discountMinor", q.total_minor::text AS "totalMinor", q.typed_details AS details,
+                q.merchant_ref AS payee, q.verified_at AS "verifiedAt", q.expires_at AS "quoteExpiresAt",
+                i.category, i.mode, i.permission_version AS "currentPermissionVersion"
+         FROM approvals a JOIN vendor_quotes q ON q.id = a.quote_id AND q.owner_id = a.owner_id
+         JOIN purchase_operations o ON o.id = a.operation_id AND o.owner_id = a.owner_id
+         JOIN procurement_instructions i ON i.id = o.instruction_id AND i.owner_id = o.owner_id
+         WHERE a.id = $1 AND a.owner_id = $2`, [approvalReadMatch[1], member.id],
+      );
+      if (!result.rowCount) return json(response, 404, { code: 'APPROVAL_NOT_FOUND' });
+      const approval = result.rows[0] as Record<string, unknown>;
+      if (Number(approval['permissionVersion']) !== Number(approval['currentPermissionVersion'])) return json(response, 409, { code: 'STALE_AGREEMENT_VERSION' });
+      return json(response, 200, { approval, readOnly: true, externalExecutionEnabled: false });
+    }
+
     const fixtureDecisionMatch = url.pathname.match(/^\/api\/v1\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/fixture-decision$/i);
     if (request.method === 'POST' && fixtureDecisionMatch) {
       if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
@@ -1966,11 +2066,12 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         }
         const current = await db.query<{
           approvalVersion: number | string; approvalStatus: string; expiresAt: Date; permissionVersion: number | string;
-          quoteHash: string; currentQuoteHash: string; operationId: string; operationState: string;
+          quoteHash: string; currentQuoteHash: string; operationId: string; operationState: string; currentPermissionVersion: number | string;
         }>(
           `SELECT a.version AS "approvalVersion", a.status AS "approvalStatus", a.expires_at AS "expiresAt",
                   a.permission_version AS "permissionVersion", a.quote_hash AS "quoteHash",
-                  q.content_hash AS "currentQuoteHash", o.id AS "operationId", o.state AS "operationState"
+                  q.content_hash AS "currentQuoteHash", o.id AS "operationId", o.state AS "operationState",
+                  i.permission_version AS "currentPermissionVersion"
            FROM approvals a
            JOIN purchase_operations o ON o.id = a.operation_id AND o.owner_id = a.owner_id
            JOIN vendor_quotes q ON q.id = a.quote_id AND q.operation_id = o.id AND q.owner_id = a.owner_id
@@ -1987,6 +2088,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         if (!approval) return reject(404, 'APPROVAL_NOT_FOUND');
         if (approval.approvalStatus !== 'PENDING' || new Date(approval.expiresAt) <= new Date()) return reject(410, 'APPROVAL_EXPIRED_OR_DECIDED');
         if (Number(approval.approvalVersion) !== Number(versionHeader[1])) return reject(412, 'VERSION_CONFLICT');
+        if (Number(approval.permissionVersion) !== Number(approval.currentPermissionVersion)) return reject(409, 'STALE_AGREEMENT_VERSION');
         if (approval.quoteHash.trim() !== approval.currentQuoteHash.trim()) return reject(409, 'QUOTE_BINDING_CHANGED');
         const nextStatus = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
         const nextOperationState = decision === 'APPROVE' ? 'FIXTURE_APPROVED' : 'BLOCKED';

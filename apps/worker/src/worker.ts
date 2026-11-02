@@ -26,6 +26,7 @@ const batchSize = boundedInteger(process.env['WORKER_BATCH_SIZE'], 4, 1, 32);
 const pool = new Pool({ connectionString: databaseUrl, max: batchSize + 2, application_name: `appai-worker-${workerId}` });
 
 let stopping = false;
+let lastApprovalExpirySweep = 0;
 
 function boundedInteger(raw: string | undefined, fallback: number, minimum: number, maximum: number): number {
   const parsed = Number(raw);
@@ -613,12 +614,42 @@ async function processJob(job: DurableJob): Promise<void> {
   }
 }
 
+async function expireStaleApprovals(): Promise<void> {
+  if (Date.now() - lastApprovalExpirySweep < 60_000) return;
+  lastApprovalExpirySweep = Date.now();
+  await pool.query(`WITH expired_quotes AS (
+      UPDATE vendor_quote_lifecycle l SET state = 'EXPIRED', changed_at = now()
+      FROM vendor_quotes q WHERE q.id = l.quote_id AND q.owner_id = l.owner_id
+        AND l.state = 'ACTIVE' AND q.expires_at <= now()
+      RETURNING l.owner_id, l.quote_id
+    ), quote_notices AS (
+      INSERT INTO notifications (owner_id, event_key, type, safe_content)
+      SELECT owner_id, 'quote-expired:' || quote_id::text, 'FIXTURE_RESULT',
+             jsonb_build_object('label', 'LOCAL FIXTURE ONLY', 'message', 'A quote expired. Request a fresh quote before deciding.')
+      FROM expired_quotes ON CONFLICT (event_key) DO NOTHING
+    ), expired AS (
+      UPDATE approvals a SET status = 'EXPIRED', decided_at = now(), version = a.version + 1
+      FROM purchase_operations o
+      WHERE a.operation_id = o.id AND a.owner_id = o.owner_id AND a.status = 'PENDING' AND a.expires_at <= now()
+      RETURNING a.owner_id, a.id AS approval_id, a.operation_id, o.instruction_id
+    ), blocked AS (
+      UPDATE purchase_operations o SET state = 'BLOCKED', outcome_reason = 'APPROVAL_EXPIRED', version = o.version + 1, updated_at = now()
+      FROM expired e WHERE o.id = e.operation_id AND o.owner_id = e.owner_id AND o.state = 'FIXTURE_AWAITING_REVIEW'
+      RETURNING e.owner_id, e.approval_id, e.operation_id, e.instruction_id
+    )
+    INSERT INTO notifications (owner_id, operation_id, instruction_id, event_key, type, safe_content)
+    SELECT owner_id, operation_id, instruction_id, 'approval-expired:' || approval_id::text, 'FIXTURE_RESULT',
+           jsonb_build_object('label', 'LOCAL FIXTURE ONLY', 'message', 'The review window expired. Request a fresh quote before deciding.')
+    FROM blocked ON CONFLICT (event_key) DO NOTHING`);
+}
+
 async function run(): Promise<void> {
   console.info(`durable worker started id=${workerId} pollMs=${pollMs} leaseMs=${leaseMs}`);
   while (!stopping) {
     try {
       await heartbeat();
       await enqueueDueInstructions();
+      await expireStaleApprovals();
       const jobs = await claimJobs();
       if (jobs.length === 0) {
         await new Promise((resolve) => setTimeout(resolve, pollMs));
@@ -626,7 +657,7 @@ async function run(): Promise<void> {
         await Promise.all(jobs.map(processJob));
       }
     } catch (error) {
-      console.error(`worker polling failed code=${errorCode(error)}`);
+      console.error(`worker polling failed code=${errorCode(error)} message=${error instanceof Error ? error.message : 'unknown'}`);
       await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs * 3, 10_000)));
     }
   }

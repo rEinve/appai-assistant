@@ -62,6 +62,20 @@ export interface VendorOffer {
   billingCycle?: string
 }
 
+export interface CandidateSupplier {
+  id: string
+  name: string
+  tier: "PRIVATE_HISTORY" | "BUDGET_PREFERRED" | "CATALOGUE" | "WEB_RESEARCH"
+  category: string
+  serviceAreas?: string[]
+  sourceUrl?: string
+  provenance: string
+  freshnessTimestamp: string
+  verifiedPaypalSupport: boolean
+  confidenceScore: number
+  notes?: string
+}
+
 export interface Operation {
   id: string
   obligationId?: string

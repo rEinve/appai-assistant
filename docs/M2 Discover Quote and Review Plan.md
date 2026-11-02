@@ -1,6 +1,6 @@
 # M2: Discover, Quote, and Review Plan — Implementation & Acceptance Specification
 
-Status: **Ready for Review & User Sign-Off**  
+Status: **Implementation in progress · external execution remains disabled**
 Date: **2 November 2026**  
 Scope: Milestone M2 (`AC-04`, `AC-05`, `AC-06`, `AC-11`, `FR-01`, `FR-02`, `FR-03`, `FR-04`, `FR-07`, `FR-11`, `FR-13`, `FR-17`, `FR-20`)  
 Authority: [Implementation Plan](A-P-P-A-I-agent-product-implementation-plan.md) (Milestone M2, Priority Correction), [PRD](A-P-P-A-I-agent-product-requirements-document.md) (§ 3, § 4), [Technical Requirements](A-P-P-A-I-agent-technical-requirements-document.md) (§ 2, § 3), [Schema](A-P-P-A-I-agent-schema.md) (§ 2, § 3), [Acceptance Matrix](DEVELOPMENT-ACCEPTANCE.md) (`AC-04`, `AC-05`, `AC-06`, `AC-11`), [Supplier Discovery Design](MEMBER-PROMPT-AND-SUPPLIER-DISCOVERY-DESIGN.md).
