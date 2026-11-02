@@ -11,6 +11,13 @@ import {
   type PayPalOrderResult,
 } from '../../../packages/adapters/paypal-sandbox/src/index';
 import { createAuthRuntime, resolveMember } from './auth';
+import {
+  validateProductCriteria,
+  validateBillCriteria,
+  validateAccommodationCriteria,
+  reconcileQuoteTotals,
+  computeQuoteHash,
+} from '../../../packages/domain/src/index';
 
 const port = Number(process.env['APP_PORT'] ?? 4300);
 const mode = process.env['PAYPAL_DEMO_MODE'] ?? 'fixture';
@@ -954,8 +961,8 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       const db = await authRuntime.pool.connect();
       try {
         await db.query('BEGIN');
-        const currentResult = await db.query<{ version: number | string; state: string; kind: string; category: string | null; structuredConstraints: Record<string, unknown> }>(
-          `SELECT version, state, kind, category, structured_constraints AS "structuredConstraints"
+        const currentResult = await db.query<{ version: number | string; state: string; kind: string; category: string | null; structuredConstraints: Record<string, unknown>; watchConfig: Record<string, unknown> | null }>(
+          `SELECT version, state, kind, category, structured_constraints AS "structuredConstraints", watch_config AS "watchConfig"
            FROM procurement_instructions WHERE id = $1 AND owner_id = $2 FOR UPDATE`,
           [configurationMatch[1], member.id],
         );
@@ -996,6 +1003,14 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           return json(response, 400, { code: 'INVALID_CATEGORY_DETAILS', message: `Complete the required ${current.category.toLowerCase()} fields with valid values.` });
         }
         const effectiveCategoryDetails = categoryDetails ?? {};
+        const submittedSoftThreshold = Object.hasOwn(input, 'softReviewThresholdMinor') ? input['softReviewThresholdMinor'] : current.structuredConstraints['softReviewThresholdMinor'];
+        const softReviewThresholdMinor = submittedSoftThreshold === undefined || submittedSoftThreshold === null || submittedSoftThreshold === ''
+          ? null : String(submittedSoftThreshold);
+        if (softReviewThresholdMinor !== null && (!/^\d+$/.test(softReviewThresholdMinor) || BigInt(softReviewThresholdMinor) < 1n
+          || (maxTotalMinor && BigInt(softReviewThresholdMinor) > BigInt(maxTotalMinor)))) {
+          await db.query('ROLLBACK');
+          return json(response, 400, { code: 'INVALID_SOFT_REVIEW_THRESHOLD' });
+        }
         if (current.kind === 'RECURRING_BILL' && current.category !== 'BILL') { await db.query('ROLLBACK'); return json(response, 422, { code: 'RECURRING_BILL_REQUIRES_BILL' }); }
         const recurringDueAt = current.kind === 'RECURRING_BILL' ? localDateTimeToInstant(effectiveCategoryDetails['dueAtLocal'], timezone) : null;
         if (current.kind === 'RECURRING_BILL' && (!recurringDueAt || (validFrom && recurringDueAt < validFrom) || (validUntil && recurringDueAt > validUntil))) {
@@ -1007,7 +1022,14 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           localTime: String(effectiveCategoryDetails['dueAtLocal']).slice(11), timezone,
           missedCyclePolicy: 'PROCESS_EACH_UNIQUE_CYCLE',
         } : null;
-        const watchConfig = current.kind === 'WATCH' ? { frequency: 'ONCE', timezone, source: 'LOCAL_FIXTURE' } : null;
+        const watchFrequency = String(input['watchFrequency'] ?? current.watchConfig?.['frequency'] ?? 'ONCE').toUpperCase();
+        const watchIntervalMinutes = Number(input['watchIntervalMinutes'] ?? current.watchConfig?.['intervalMinutes'] ?? 60);
+        if (current.kind === 'WATCH' && (!['ONCE', 'INTERVAL'].includes(watchFrequency)
+          || !Number.isInteger(watchIntervalMinutes) || watchIntervalMinutes < 5 || watchIntervalMinutes > 1440)) {
+          await db.query('ROLLBACK');
+          return json(response, 400, { code: 'INVALID_WATCH_SCHEDULE' });
+        }
+        const watchConfig = current.kind === 'WATCH' ? { frequency: watchFrequency, intervalMinutes: watchIntervalMinutes, timezone, source: 'LOCAL_FIXTURE' } : null;
         const firstRunAt = recurringDueAt ?? (current.kind === 'WATCH' ? validFrom ?? new Date() : null);
         const budgetId = typeof input['budgetId'] === 'string' && input['budgetId'] ? input['budgetId'] : null;
         if (budgetId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(budgetId)) { await db.query('ROLLBACK'); return json(response, 400, { code: 'INVALID_BUDGET_ID', message: 'Choose one of your listed budget allocations.' }); }
@@ -1049,7 +1071,8 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           return json(response, 400, { code: 'INVALID_RECURRING_BILL_FIRST_DUE', message: 'The first bill due date must fall inside the instruction and budget dates.' });
         }
         const effectiveFirstRunAt = current.kind === 'WATCH' ? effectiveValidFrom ?? new Date() : firstRunAt;
-        const constraints = { ...current.structuredConstraints, description: promptText, categoryDetails: effectiveCategoryDetails };
+        const constraints = { ...current.structuredConstraints, description: promptText, categoryDetails: effectiveCategoryDetails,
+          ...(softReviewThresholdMinor ? { softReviewThresholdMinor } : {}) };
         const updated = await db.query(
           `UPDATE procurement_instructions
            SET budget_id = $3, max_total_minor = $4,
@@ -1249,6 +1272,12 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         budgetId = instruction.rows[0]!.budgetId;
         area ||= instruction.rows[0]!.area ?? '';
       }
+      const requestedBudgetId = url.searchParams.get('budgetId');
+      if (!instructionId && requestedBudgetId) {
+        const ownedBudget = await authRuntime.pool.query('SELECT 1 FROM budgets WHERE id = $1 AND owner_id = $2 AND active = true', [requestedBudgetId, member.id]);
+        if (!ownedBudget.rowCount) return json(response, 404, { code: 'BUDGET_NOT_FOUND' });
+        budgetId = requestedBudgetId;
+      }
       if (!['PRODUCT', 'BILL', 'ACCOMMODATION'].includes(category)) return json(response, 400, { code: 'CATEGORY_REQUIRED' });
       const [privateCandidates, preferredCandidates, catalogueCandidates] = await Promise.all([
         authRuntime.pool.query(`SELECT s.id, s.private_name AS name, s.service_areas AS "serviceAreas", s.private_notes AS notes,
@@ -1268,11 +1297,26 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           ORDER BY source_checked_at DESC NULLS LAST, canonical_name LIMIT 20`, [category, area]),
       ]);
       const fetchedAt = new Date().toISOString();
-      const ranked: Array<Record<string, unknown>> = [
-        ...privateCandidates.rows.map((r: Record<string, unknown>) => ({ ...r, verifiedPaypalSupport: false, confidenceScore: 0.8, provenance: 'Member private supplier record' })),
-        ...preferredCandidates.rows.map((r: Record<string, unknown>) => ({ ...r, verifiedPaypalSupport: false, confidenceScore: 0.85, provenance: 'Budget preference' })),
-        ...catalogueCandidates.rows.map((r: Record<string, unknown>) => ({ ...r, verifiedPaypalSupport: false, confidenceScore: 0.7, provenance: 'Verified catalogue record' })),
-      ].slice(0, 3);
+      const candidateById = new Map<string, Record<string, unknown>>();
+      for (const row of privateCandidates.rows as Array<Record<string, unknown>>) {
+        candidateById.set(String(row['id']), { ...row, verifiedPaypalSupport: false, confidenceScore: 0.8, provenance: 'Member private supplier record', tiers: ['PRIVATE_HISTORY'] });
+      }
+      for (const row of preferredCandidates.rows as Array<Record<string, unknown>>) {
+        const id = String(row['id']);
+        const prior = candidateById.get(id);
+        candidateById.set(id, { ...prior, ...row, verifiedPaypalSupport: false, confidenceScore: 0.85,
+          provenance: prior ? 'Member private supplier record · preferred for this budget' : 'Budget preference',
+          tiers: prior ? ['BUDGET_PREFERRED', 'PRIVATE_HISTORY'] : ['BUDGET_PREFERRED'],
+          tier: 'BUDGET_PREFERRED', preferenceRank: row['rank'] });
+      }
+      for (const row of catalogueCandidates.rows as Array<Record<string, unknown>>) {
+        const id = String(row['id']);
+        if (!candidateById.has(id)) candidateById.set(id, { ...row, verifiedPaypalSupport: false, confidenceScore: 0.7, provenance: 'Verified catalogue record', tiers: ['CATALOGUE'] });
+      }
+      const tierOrder = (candidate: Record<string, unknown>) => candidate['tier'] === 'BUDGET_PREFERRED' ? 0 : candidate['tier'] === 'PRIVATE_HISTORY' ? 1 : 2;
+      const ranked: Array<Record<string, unknown>> = [...candidateById.values()].sort((a, b) => tierOrder(a) - tierOrder(b)
+        || Number(a['preferenceRank'] ?? 999) - Number(b['preferenceRank'] ?? 999)
+        || String(b['freshnessTimestamp'] ?? '').localeCompare(String(a['freshnessTimestamp'] ?? ''))).slice(0, 3);
       const searchQuery = url.searchParams.get('query')?.trim() ?? '';
       const providerKey = process.env['serperApiKey']?.trim() || process.env['SERPER_API_KEY']?.trim();
       if (searchQuery.length >= 3 && searchQuery.length <= 160 && providerKey && ranked.length < 3
@@ -1714,8 +1758,8 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       if (draft.kind === 'RECURRING_BILL' && (!draft.scheduleConfig || draft.scheduleConfig['frequency'] !== 'MONTHLY')) {
         block('RECURRING_SCHEDULE_MISSING', 'Set the monthly bill schedule', 'A recurring bill needs a valid first due date and monthly cycle before fixture activation.');
       }
-      if (draft.kind === 'WATCH' && (draft.mode !== 'NOTIFY_ONLY' || !draft.watchConfig || draft.watchConfig['frequency'] !== 'ONCE')) {
-        block('FIXTURE_WATCH_UNSUPPORTED', 'This fixture watch is not ready', 'The M1 local observation fixture supports notify-only watches. It never creates a quote or purchase.');
+      if (draft.kind === 'WATCH' && (!draft.watchConfig || !['ONCE', 'INTERVAL'].includes(String(draft.watchConfig['frequency'])))) {
+        block('FIXTURE_WATCH_UNSUPPORTED', 'This fixture watch is not ready', 'Fixture watches support one-time or interval observation; provider execution remains disabled.');
       }
       const quoteRequirement: Record<string, string> = {
         PRODUCT: 'A supported vendor must verify the exact item or variant, destination eligibility, stock, delivery terms, and full price.',
@@ -1806,7 +1850,7 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         if (!['ONE_TIME', 'SCHEDULED', 'RECURRING_BILL', 'WATCH'].includes(instruction.kind)
             || (instruction.kind === 'RECURRING_BILL' && instruction.category !== 'BILL')) fixtureBlockers.push('FIXTURE_SCHEDULE_UNSUPPORTED');
         if (instruction.kind === 'RECURRING_BILL' && (!instruction.scheduleConfig || instruction.scheduleConfig['frequency'] !== 'MONTHLY')) fixtureBlockers.push('RECURRING_SCHEDULE_MISSING');
-        if (instruction.kind === 'WATCH' && (instruction.mode !== 'NOTIFY_ONLY' || !instruction.watchConfig || instruction.watchConfig['frequency'] !== 'ONCE')) fixtureBlockers.push('FIXTURE_WATCH_UNSUPPORTED');
+        if (instruction.kind === 'WATCH' && (!instruction.watchConfig || !['ONCE', 'INTERVAL'].includes(String(instruction.watchConfig['frequency'])))) fixtureBlockers.push('FIXTURE_WATCH_UNSUPPORTED');
         if (!instruction.maxTotalMinor || BigInt(instruction.maxTotalMinor) <= 0n) fixtureBlockers.push('MAX_TOTAL_MISSING');
         if (!instruction.currency || instruction.currency.trim() !== instruction.enabledCurrency?.trim()) fixtureBlockers.push('CURRENCY_MISMATCH');
         if (!instruction.budgetId || !instruction.budgetActive || instruction.budgetCurrency?.trim() !== instruction.currency?.trim()) fixtureBlockers.push('BUDGET_UNAVAILABLE');
@@ -1970,6 +2014,91 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         db.release();
       }
     }
+    const quoteCreateMatch = url.pathname.match(/^\/api\/v1\/instructions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/quotes$/i);
+    if (request.method === 'POST' && quoteCreateMatch) {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      const key = request.headers['idempotency-key'];
+      if (typeof key !== 'string' || key.length < 8 || key.length > 128) return json(response, 400, { code: 'IDEMPOTENCY_KEY_REQUIRED' });
+      const input = await body(request);
+      if (['SEARCH_SNIPPET', 'ESTIMATE', 'ADVERTISED_OFFER', 'STALE_STOCK'].includes(String(input['evidenceType']))) return json(response, 422, { code: 'NON_AUTHORITATIVE_DISCOVERY_EVIDENCE' });
+      if (input['evidenceType'] !== 'AUTHORITATIVE_QUOTE') return json(response, 422, { code: 'NON_AUTHORITATIVE_DISCOVERY_EVIDENCE' });
+      const details = input['typedDetails'];
+      const totals = input['amounts'] as Record<string, unknown> | undefined;
+      const sourceQuoteKey = typeof input['sourceQuoteKey'] === 'string' ? input['sourceQuoteKey'].trim() : '';
+      const merchantRef = typeof input['merchantRef'] === 'string' ? input['merchantRef'].trim() : '';
+      const currency = typeof totals?.['currency'] === 'string' ? String(totals['currency']).toUpperCase() : '';
+      const quantity = Number(input['quantity'] ?? (details && typeof details === 'object' ? (details as Record<string, unknown>)['quantity'] : 1));
+      if (!sourceQuoteKey || sourceQuoteKey.length > 200 || !merchantRef || merchantRef.length > 200 || !Number.isSafeInteger(quantity) || quantity < 1 || !totals) return json(response, 400, { code: 'INVALID_QUOTE_INPUT' });
+      const routeScope = `POST /api/v1/instructions/${quoteCreateMatch[1]}/quotes`;
+      const requestHash = createHash('sha256').update(JSON.stringify({ evidenceType: input['evidenceType'], sourceQuoteKey, merchantRef, details, totals, quantity })).digest('hex');
+      const db = await authRuntime.pool.connect();
+      try {
+        await db.query('BEGIN');
+        const claimed = await db.query(`INSERT INTO api_idempotency (actor_id, route_scope, key, request_hash, state, retention_until)
+          VALUES ($1, $2, $3, $4, 'IN_PROGRESS', now() + interval '30 days') ON CONFLICT (actor_id, route_scope, key) DO NOTHING RETURNING key`, [member.id, routeScope, key, requestHash]);
+        if (!claimed.rowCount) {
+          const prior = await db.query<{ request_hash: string; state: string; response: unknown }>('SELECT request_hash, state, response FROM api_idempotency WHERE actor_id = $1 AND route_scope = $2 AND key = $3 FOR UPDATE', [member.id, routeScope, key]);
+          await db.query('ROLLBACK');
+          if (prior.rows[0]?.request_hash !== requestHash) return json(response, 409, { code: 'IDEMPOTENCY_KEY_REUSED' });
+          if (prior.rows[0]?.state === 'COMPLETED' && prior.rows[0]?.response) return json(response, 200, prior.rows[0].response);
+          return json(response, 409, { code: 'REQUEST_IN_PROGRESS' });
+        }
+        const locked = await db.query<{ id: string; kind: string; category: string; mode: string; state: string; permissionVersion: number | string; maxTotalMinor: string; currency: string; budgetId: string; constraints: Record<string, unknown> }>(
+          `SELECT i.id, i.kind, i.category, i.mode, i.state, i.permission_version AS "permissionVersion", i.max_total_minor::text AS "maxTotalMinor", i.currency, i.budget_id AS "budgetId", i.structured_constraints AS constraints
+           FROM procurement_instructions i WHERE i.id = $1 AND i.owner_id = $2 FOR UPDATE`, [quoteCreateMatch[1], member.id]);
+        const instruction = locked.rows[0];
+        if (!instruction) { await db.query('ROLLBACK'); return json(response, 404, { code: 'INSTRUCTION_NOT_FOUND' }); }
+        if (instruction.state !== 'ACTIVE' || instruction.currency.trim() !== currency) { await db.query('ROLLBACK'); return json(response, instruction.state !== 'ACTIVE' ? 409 : 422, { code: instruction.state !== 'ACTIVE' ? 'INSTRUCTION_NOT_ACTIVE' : 'CURRENCY_MISMATCH' }); }
+        const validator = instruction.category === 'PRODUCT' ? validateProductCriteria(details)
+          : instruction.category === 'BILL' ? validateBillCriteria(details) : validateAccommodationCriteria(details);
+        if (!validator.valid) { await db.query('ROLLBACK'); return json(response, 422, { code: 'CATEGORY_CRITERIA_MISMATCH', issues: validator.issues }); }
+        const expected = (instruction.constraints['categoryDetails'] && typeof instruction.constraints['categoryDetails'] === 'object') ? instruction.constraints['categoryDetails'] as Record<string, unknown> : {};
+        const actual = details as Record<string, unknown>;
+        const comparable = instruction.category === 'PRODUCT' ? [['variant', 'variant'], ['quantity', 'quantity'], ['deliveryWindow', 'deliveryWindow'], ['returnPolicy', 'returnPolicy']]
+          : instruction.category === 'BILL' ? [['payeeName', 'payeeName'], ['accountRef', 'accountRef'], ['invoiceRef', 'invoiceRef'], ['billingCycle', 'billingCycle'], ['unpaidStatus', 'unpaidStatus']]
+            : [['destination', 'destination'], ['checkIn', 'checkIn'], ['checkOut', 'checkOut'], ['guests', 'guests'], ['rooms', 'rooms'], ['rateType', 'rateType'], ['cancellationTerms', 'cancellationTerms']];
+        if (comparable.some(([want, got]) => expected[want] !== undefined && String(expected[want]).trim().toLowerCase() !== String(actual[got] ?? '').trim().toLowerCase())) { await db.query('ROLLBACK'); return json(response, 422, { code: 'CATEGORY_CRITERIA_MISMATCH' }); }
+        const canonicalQuote = { sourceQuoteKey, subtotalMinor: String(totals['subtotalMinor'] ?? ''), taxMinor: String(totals['taxMinor'] ?? '0'), shippingMinor: String(totals['shippingMinor'] ?? '0'), feesMinor: String(totals['feesMinor'] ?? '0'), discountMinor: String(totals['discountMinor'] ?? '0'), totalMinor: String(totals['totalMinor'] ?? ''), currency, payee: merchantRef, terms: input['terms'] ?? {} };
+        const quoteValidation = reconcileQuoteTotals(canonicalQuote, instruction.currency.trim());
+        if (!quoteValidation.valid) { await db.query('ROLLBACK'); const first = quoteValidation.issues[0]?.code ?? 'INVALID_QUOTE'; return json(response, 422, { code: first }); }
+        if (BigInt(canonicalQuote.totalMinor) > BigInt(instruction.maxTotalMinor)) { await db.query('ROLLBACK'); return json(response, 422, { code: 'QUOTE_EXCEEDS_MAX_TOTAL' }); }
+        const contentHash = computeQuoteHash(canonicalQuote);
+        const obligation = await db.query<{ id: string }>(`INSERT INTO procurement_obligations (owner_id, instruction_id, obligation_key, category, fulfillment_slot)
+          VALUES ($1, $2, $3, $4::instruction_category, $3) RETURNING id`, [member.id, instruction.id, `QUOTE:${key}`, instruction.category]);
+        const operation = await db.query<{ id: string }>(`INSERT INTO purchase_operations (owner_id, instruction_id, obligation_id, state, permission_version, execution_key)
+          VALUES ($1, $2, $3, 'FIXTURE_QUOTED', $4, $5) RETURNING id`, [member.id, instruction.id, obligation.rows[0]!.id, instruction.permissionVersion, `quote:${instruction.id}:${key}`]);
+        const adapter = await db.query<{ id: string; adapterVersion: string }>(`SELECT id, adapter_version AS "adapterVersion" FROM vendor_adapters WHERE adapter_key = 'local-fixture' AND environment = 'FIXTURE' AND enabled = true AND execution_enabled = false AND status = 'VERIFIED' LIMIT 1`);
+        if (!adapter.rows[0]) { await db.query('ROLLBACK'); return json(response, 503, { code: 'FIXTURE_ADAPTER_UNAVAILABLE' }); }
+        const quote = await db.query<{ id: string }>(`INSERT INTO vendor_quotes
+          (owner_id, operation_id, adapter_id, adapter_version, environment, merchant_ref, external_quote_ref, category, schema_version, typed_details, currency, subtotal_minor, tax_minor, fees_minor, shipping_minor, discount_minor, total_minor, quantity, terms_hash, content_hash, verified_at, expires_at)
+          VALUES ($1, $2, $3, $4, 'FIXTURE', $5, $6, $7::instruction_category, 'm2-1.0', $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now(), now() + interval '24 hours') RETURNING id`,
+          [member.id, operation.rows[0]!.id, adapter.rows[0].id, adapter.rows[0].adapterVersion, merchantRef, sourceQuoteKey, instruction.category, JSON.stringify({ ...actual, evidenceType: 'AUTHORITATIVE_QUOTE', fixtureOnly: true, terms: input['terms'] ?? {} }), currency, canonicalQuote.subtotalMinor, canonicalQuote.taxMinor, canonicalQuote.feesMinor, canonicalQuote.shippingMinor, canonicalQuote.discountMinor, canonicalQuote.totalMinor, quantity, createHash('sha256').update(JSON.stringify(input['terms'] ?? {})).digest('hex'), contentHash]);
+        const softThreshold = instruction.constraints['softReviewThresholdMinor'] ?? expected['softReviewThresholdMinor'];
+        const needsReview = instruction.mode === 'REVIEW_REQUIRED' || (instruction.mode === 'PRE_APPROVED' && softThreshold !== undefined && BigInt(canonicalQuote.totalMinor) > BigInt(String(softThreshold)));
+        const operationState = needsReview ? 'FIXTURE_AWAITING_REVIEW' : instruction.mode === 'PRE_APPROVED' ? 'FIXTURE_COMPLETED' : 'FIXTURE_QUOTED';
+        await db.query('UPDATE purchase_operations SET selected_quote_id = $3, state = $4, version = version + 1, updated_at = now() WHERE id = $1 AND owner_id = $2', [operation.rows[0]!.id, member.id, quote.rows[0]!.id, operationState]);
+        let approvalId: string | null = null;
+        if (needsReview) {
+          const approval = await db.query<{ id: string }>(`INSERT INTO approvals (owner_id, operation_id, quote_id, quote_hash, permission_version, status, expires_at)
+            VALUES ($1, $2, $3, $4, $5, 'PENDING', now() + interval '24 hours') RETURNING id`, [member.id, operation.rows[0]!.id, quote.rows[0]!.id, contentHash, instruction.permissionVersion]);
+          approvalId = approval.rows[0]!.id;
+        }
+        await db.query(`INSERT INTO notifications (owner_id, operation_id, instruction_id, event_key, type, safe_content)
+          VALUES ($1, $2, $3, $4, $5, $6::jsonb) ON CONFLICT (event_key) DO NOTHING`, [member.id, operation.rows[0]!.id, instruction.id, `m2-quote:${operation.rows[0]!.id}`, needsReview ? 'FIXTURE_REVIEW_REQUESTED' : 'FIXTURE_RESULT', JSON.stringify({ label: 'LOCAL FIXTURE ONLY', message: needsReview ? 'A validated fixture quote is ready for review. No order was placed.' : 'A fixture quote was recorded; no vendor or payment action occurred.', quoteId: quote.rows[0]!.id, approvalId })]);
+        const result = { operationId: operation.rows[0]!.id, quoteId: quote.rows[0]!.id, approvalId, operationState, quoteHash: contentHash, fixtureOnly: true };
+        await db.query(`UPDATE api_idempotency SET state = 'COMPLETED', result_ref = $4, response = $5::jsonb WHERE actor_id = $1 AND route_scope = $2 AND key = $3`, [member.id, routeScope, key, quote.rows[0]!.id, JSON.stringify(result)]);
+        await db.query('COMMIT');
+        return json(response, 201, result);
+      } catch (error) {
+        await db.query('ROLLBACK');
+        if (error && typeof error === 'object' && 'code' in error && error.code === '23505') return json(response, 409, { code: 'QUOTE_ALREADY_RECORDED' });
+        throw error;
+      } finally { db.release(); }
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/v1/activity') {
       if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
       const member = await resolveMember(authRuntime, request.headers);
@@ -2016,8 +2145,9 @@ Suggestions require member review and never authorize a purchase or schedule.` }
                 q.tax_minor::text AS "taxMinor", q.shipping_minor::text AS "shippingMinor", q.fees_minor::text AS "feesMinor",
                 q.discount_minor::text AS "discountMinor", q.total_minor::text AS "totalMinor", q.typed_details AS details,
                 q.merchant_ref AS payee, q.verified_at AS "verifiedAt", q.expires_at AS "quoteExpiresAt",
-                i.category, i.mode, i.permission_version AS "currentPermissionVersion"
+                l.state AS "quoteState", i.category, i.mode, i.permission_version AS "currentPermissionVersion"
          FROM approvals a JOIN vendor_quotes q ON q.id = a.quote_id AND q.owner_id = a.owner_id
+         LEFT JOIN vendor_quote_lifecycle l ON l.owner_id = q.owner_id AND l.quote_id = q.id
          JOIN purchase_operations o ON o.id = a.operation_id AND o.owner_id = a.owner_id
          JOIN procurement_instructions i ON i.id = o.instruction_id AND i.owner_id = o.owner_id
          WHERE a.id = $1 AND a.owner_id = $2`, [approvalReadMatch[1], member.id],
@@ -2025,10 +2155,11 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       if (!result.rowCount) return json(response, 404, { code: 'APPROVAL_NOT_FOUND' });
       const approval = result.rows[0] as Record<string, unknown>;
       if (Number(approval['permissionVersion']) !== Number(approval['currentPermissionVersion'])) return json(response, 409, { code: 'STALE_AGREEMENT_VERSION' });
+      if (approval['quoteState'] !== 'ACTIVE' || new Date(String(approval['quoteExpiresAt'])) <= new Date()) return json(response, 410, { code: approval['quoteState'] === 'INVALIDATED' ? 'QUOTE_INVALIDATED' : 'APPROVAL_EXPIRED_OR_DECIDED' });
       return json(response, 200, { approval, readOnly: true, externalExecutionEnabled: false });
     }
 
-    const fixtureDecisionMatch = url.pathname.match(/^\/api\/v1\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/fixture-decision$/i);
+    const fixtureDecisionMatch = url.pathname.match(/^\/api\/v1\/approvals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(?:fixture-decision|decide)$/i);
     if (request.method === 'POST' && fixtureDecisionMatch) {
       if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
       const member = await resolveMember(authRuntime, request.headers);
@@ -2066,15 +2197,17 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         }
         const current = await db.query<{
           approvalVersion: number | string; approvalStatus: string; expiresAt: Date; permissionVersion: number | string;
-          quoteHash: string; currentQuoteHash: string; operationId: string; operationState: string; currentPermissionVersion: number | string;
+          quoteHash: string; currentQuoteHash: string; quoteState: string | null; quoteExpiresAt: Date;
+          operationId: string; operationState: string; currentPermissionVersion: number | string;
         }>(
           `SELECT a.version AS "approvalVersion", a.status AS "approvalStatus", a.expires_at AS "expiresAt",
                   a.permission_version AS "permissionVersion", a.quote_hash AS "quoteHash",
                   q.content_hash AS "currentQuoteHash", o.id AS "operationId", o.state AS "operationState",
-                  i.permission_version AS "currentPermissionVersion"
+                  i.permission_version AS "currentPermissionVersion", l.state AS "quoteState", q.expires_at AS "quoteExpiresAt"
            FROM approvals a
            JOIN purchase_operations o ON o.id = a.operation_id AND o.owner_id = a.owner_id
            JOIN vendor_quotes q ON q.id = a.quote_id AND q.operation_id = o.id AND q.owner_id = a.owner_id
+           LEFT JOIN vendor_quote_lifecycle l ON l.owner_id = q.owner_id AND l.quote_id = q.id
            JOIN procurement_instructions i ON i.id = o.instruction_id AND i.owner_id = o.owner_id
            WHERE a.id = $1 AND a.owner_id = $2 AND i.execution_environment = 'FIXTURE'
            FOR UPDATE OF a, o`,
@@ -2086,9 +2219,9 @@ Suggestions require member review and never authorize a purchase or schedule.` }
           return json(response, status, { code });
         };
         if (!approval) return reject(404, 'APPROVAL_NOT_FOUND');
-        if (approval.approvalStatus !== 'PENDING' || new Date(approval.expiresAt) <= new Date()) return reject(410, 'APPROVAL_EXPIRED_OR_DECIDED');
+        if (approval.quoteState === 'INVALIDATED' || Number(approval.permissionVersion) !== Number(approval.currentPermissionVersion)) return reject(409, 'STALE_AGREEMENT_VERSION');
+        if (approval.quoteState !== 'ACTIVE' || new Date(approval.quoteExpiresAt) <= new Date() || approval.approvalStatus !== 'PENDING' || new Date(approval.expiresAt) <= new Date()) return reject(410, 'APPROVAL_EXPIRED_OR_DECIDED');
         if (Number(approval.approvalVersion) !== Number(versionHeader[1])) return reject(412, 'VERSION_CONFLICT');
-        if (Number(approval.permissionVersion) !== Number(approval.currentPermissionVersion)) return reject(409, 'STALE_AGREEMENT_VERSION');
         if (approval.quoteHash.trim() !== approval.currentQuoteHash.trim()) return reject(409, 'QUOTE_BINDING_CHANGED');
         const nextStatus = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
         const nextOperationState = decision === 'APPROVE' ? 'FIXTURE_APPROVED' : 'BLOCKED';

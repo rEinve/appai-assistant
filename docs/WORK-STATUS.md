@@ -45,9 +45,9 @@ The member area supports invite-only sign-in, prompt-first instruction drafts, a
 
 ## M2 implementation progress
 
-The first M2 slice adds pure typed validators for product, bill, and accommodation criteria; exact minor-unit quote reconciliation and deterministic SHA-256 hashing; owner-scoped ranked discovery across private history, budget preferences, and verified catalogue records, with optional explicitly requested Serper results marked unverified; and a read-only approval detail route with stale-agreement fencing. Discovery is capped at three results. Conversation editing displays the ranked candidates without treating them as quotes. Migration 014 tracks quote lifecycle separately from immutable quote evidence; expired approvals and quotes are swept by the worker, and material instruction changes invalidate active quote lifecycle rows.
+The five Pass 2 remediation items in the [M2 implementation plan](M2%20Discover%20Quote%20and%20Review%20Plan.md) are implemented and covered by `npm run test:m2`. The work adds deduplicated owner-scoped discovery, an idempotent fixture quote intake route with category/evidence/arithmetic/currency/ceiling checks, read-only and one-time approval lifecycle checks, watch match/no-match handling with intervals and soft thresholds, and a dedicated PostgreSQL acceptance runner. Migrations 014–015 keep quote lifecycle separate from immutable quote evidence. External provider execution remains disabled.
 
-The existing M1 fixture workflow now covers discovery owner isolation and read-only approval loading. Domain acceptance covers typed criteria and quote arithmetic/hash behavior. These checks do not establish authoritative live vendor quotes, real checkout capability, or public production readiness. M2 remains open for live discovery normalization, provider-sourced authoritative quotes, complete category-specific quote matching, approval workflow UI integration and M2-specific end-to-end coverage. External financial execution remains disabled.
+M2's fixture contracts are verified. Provider-sourced authoritative quote normalization, validated live vendor/category coverage, and production checkout capability remain open gates; fixture records do not prove those capabilities.
 
 ## Next acceptance and implementation sequence (M2 / M3)
 

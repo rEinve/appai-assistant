@@ -1,6 +1,6 @@
 # M2: Discover, Quote, and Review Plan — Implementation & Acceptance Specification
 
-Status: **Implementation in progress · external execution remains disabled**
+Status: **Pass 2 remediation implemented and verified · provider execution remains disabled**
 Date: **2 November 2026**  
 Scope: Milestone M2 (`AC-04`, `AC-05`, `AC-06`, `AC-11`, `FR-01`, `FR-02`, `FR-03`, `FR-04`, `FR-07`, `FR-11`, `FR-13`, `FR-17`, `FR-20`)  
 Authority: [Implementation Plan](A-P-P-A-I-agent-product-implementation-plan.md) (Milestone M2, Priority Correction), [PRD](A-P-P-A-I-agent-product-requirements-document.md) (§ 3, § 4), [Technical Requirements](A-P-P-A-I-agent-technical-requirements-document.md) (§ 2, § 3), [Schema](A-P-P-A-I-agent-schema.md) (§ 2, § 3), [Acceptance Matrix](DEVELOPMENT-ACCEPTANCE.md) (`AC-04`, `AC-05`, `AC-06`, `AC-11`), [Supplier Discovery Design](MEMBER-PROMPT-AND-SUPPLIER-DISCOVERY-DESIGN.md).
@@ -194,23 +194,127 @@ flowchart TD
 
 ---
 
-## 4. Verification & Exit Checklist
+## 4. Chief Engineer Review — Pass 2 Audit & Remediation Specification for Dev
+
+**Review Date**: 2 November 2026
+**Review Verdict**: **PARTIAL PASS (Slice 1 Verified · 5 Remediation Items Required Before M2 Green-Light)**
+
+### 4.1 What Passed in Slice 1
+- **Domain Category & Quote Primitives (`packages/domain/src/index.ts`, `8/8` pass in `npm run test:domain`)**:
+  - `validateProductCriteria`, `validateBillCriteria`, and `validateAccommodationCriteria` enforce category constraints and reject already-paid bills and invalid stay date ranges.
+  - `reconcileQuoteTotals` and `computeQuoteHash` enforce exact minor-unit arithmetic (`UNRECONCILED_QUOTE_ARITHMETIC`), currency match (`CURRENCY_MISMATCH`), and canonical SHA-256 hashing.
+- **Quote Lifecycle Schema & Worker Expiry Sweeper (`014_quote_lifecycle.sql`, `015_quote_lifecycle_cleanup.sql`, `expireStaleApprovals`)**:
+  - `vendor_quote_lifecycle` tracks `ACTIVE`, `EXPIRED`, and `INVALIDATED` states without mutating immutable `vendor_quotes` rows.
+  - Instruction amendments (`POST /api/v1/instructions/:id/confirm-agreement` and `PATCH /api/v1/instructions/:id/configuration`) invalidate active `vendor_quote_lifecycle` rows and pending `approvals`.
+- **Read-Only Approval Inspection (`GET /api/v1/approvals/:id`)**:
+  - Returns `readOnly: true` without mutating `PENDING` state and blocks stale agreement versions with `409 STALE_AGREEMENT_VERSION`.
+
+---
+
+### 4.2 Five Remaining Blockers Dev Must Implement to Green-Light M2
+
+#### Item M2-R1: Fix Duplicate Supplier Bug in Ranked Discovery (`apps/api/src/server.ts`)
+- **Problem**: In `GET /api/v1/discovery/candidates` (`apps/api/src/server.ts` lines 1253–1275), `privateCandidates` and `preferredCandidates` both query `member_suppliers` and are concatenated without deduplicating by supplier `id`. When a member's private supplier is also ranked in `budget_supplier_preferences`, the same supplier appears twice in the top-3 `ranked` list.
+- **Required Fix**:
+  1. Deduplicate candidates by supplier `id` before slicing to `.slice(0, 3)`.
+  2. When a private supplier is also present in `preferredCandidates` for the active budget, order `BUDGET_PREFERRED` (or merged `PRIVATE_HISTORY` + `BUDGET_PREFERRED` with `preferenceRank`) first so each unique supplier occupies at most 1 slot in the top-3 shortlist.
+
+#### Item M2-R2: Wire Domain Category & Quote Validators into API Quote Creation (`apps/api/src/server.ts`)
+- **Problem**: `validateProductCriteria`, `validateBillCriteria`, `validateAccommodationCriteria`, `reconcileQuoteTotals`, and `computeQuoteHash` exist in `packages/domain/src/index.ts`, but neither `apps/api/src/server.ts` nor `apps/worker/src/worker.ts` imports or calls them. Furthermore, `POST /api/v1/instructions/:id/quotes` (Step 4) is not yet implemented.
+- **Required Fix**:
+  1. Import `validateProductCriteria`, `validateBillCriteria`, `validateAccommodationCriteria`, `reconcileQuoteTotals`, and `computeQuoteHash` into `apps/api/src/server.ts` (and `apps/worker/src/worker.ts`).
+  2. Implement `POST /api/v1/instructions/:id/quotes` (owner-scoped, idempotent via `Idempotency-Key`):
+     - Reject non-authoritative discovery inputs where `evidenceType` is `'SEARCH_SNIPPET'`, `'ESTIMATE'`, `'ADVERTISED_OFFER'`, or `'STALE_STOCK'` with `422 NON_AUTHORITATIVE_DISCOVERY_EVIDENCE` (`AC-05`).
+     - Validate category-specific `typedDetails` against the instruction's category (`validateProductCriteria`, `validateBillCriteria`, or `validateAccommodationCriteria`) and verify constraint compatibility against `instruction.structured_constraints.categoryDetails` (e.g., destination, checkIn/checkOut, guests/rooms, unpaidStatus, variant/quantity). Reject mismatches with `422 CATEGORY_CRITERIA_MISMATCH` (`AC-04`).
+     - Validate exact minor-unit arithmetic (`subtotalMinor + taxMinor + shippingMinor + feesMinor - discountMinor === totalMinor`) and currency match via `reconcileQuoteTotals`. Reject mismatches with `422 UNRECONCILED_QUOTE_ARITHMETIC` or `422 CURRENCY_MISMATCH` (`AC-05`).
+     - Enforce price ceiling: if `BigInt(totalMinor) > BigInt(instruction.max_total_minor)`, reject with `422 QUOTE_EXCEEDS_MAX_TOTAL`.
+     - Compute deterministic `content_hash = computeQuoteHash(...)`, persist to `vendor_quotes`, create/update the bound `purchase_operations` row (`FIXTURE_AWAITING_REVIEW` when `REVIEW_REQUIRED` or when `PRE_APPROVED` exceeds `softReviewThresholdMinor`; `FIXTURE_COMPLETED` when `PRE_APPROVED` within threshold; `FIXTURE_QUOTED` when `NOTIFY_ONLY`), and emit the corresponding `approvals` and `notifications` rows.
+
+#### Item M2-R3: Worker Watch Criteria Evaluation, No-Match Continuation & Soft Review Threshold (`apps/worker/src/worker.ts`)
+- **Problem**:
+  - `processObservation` (`apps/worker/src/worker.ts` lines 523–552) currently blocks any watch whose mode is not `NOTIFY_ONLY` (`WATCH_PERMISSION_UNSUPPORTED`) and unconditionally writes a synthetic match on the first run instead of evaluating candidate criteria and continuing to wait until `valid_until` when no candidate matches (`AC-04`, `AC-06`).
+  - `processOccurrence` (`apps/worker/src/worker.ts` lines 416–435) does not check `softReviewThresholdMinor` on `PRE_APPROVED` instructions (`AC-06`).
+- **Required Fix**:
+  1. In `apps/api/src/server.ts` (`/readiness` and `/activate-fixture`) and `apps/worker/src/worker.ts` (`processObservation`):
+     - Allow `WATCH` instructions with `mode IN ('NOTIFY_ONLY', 'REVIEW_REQUIRED', 'PRE_APPROVED')` and `watchConfig.frequency IN ('ONCE', 'INTERVAL')`.
+  2. In `processObservation`:
+     - Inspect candidate offer payload (if provided in `job.payload.candidateOffer` or `instruction.structured_constraints.watchCandidate`).
+     - If a candidate is marked no-match or fails category criteria validation (`validateProductCriteria` / `validateBillCriteria` / `validateAccommodationCriteria`) or exceeds `max_total_minor`:
+       - Do **not** create a `vendor_quotes` or `approvals` row.
+       - Record an audit/observation trace (`WATCH_NO_MATCH_CONTINUING`).
+       - If `now() < instruction.validUntil`, advance `procurement_instructions.next_run_at` to the next poll interval (e.g., `LEAST(instruction.valid_until, now() + interval '1 hour')`) and keep `instruction.state = 'ACTIVE'` (`AC-04`). If `now() >= instruction.validUntil`, transition instruction to `EXPIRED`.
+     - If the candidate matches all category criteria and `totalMinor <= max_total_minor`:
+       - Deduplicate via `offer_observations (instruction_id, source_offer_key, material_fingerprint)`.
+       - If `mode === 'NOTIFY_ONLY'`, record the observation and `FIXTURE_OBSERVATION` notification without creating an approval or purchase operation (`AC-06`).
+       - If `mode === 'REVIEW_REQUIRED'` (e.g., Arusha stay watch match), create the `purchase_operations` (`FIXTURE_AWAITING_REVIEW`), immutable `vendor_quotes`, `PENDING` `approvals` row, and `FIXTURE_REVIEW_REQUESTED` notification (`AC-06`).
+  3. In `processOccurrence` (and quote evaluation):
+     - Check `softReviewThresholdMinor` in `instruction.structured_constraints` (or `categoryDetails`). When `instruction.mode === 'PRE_APPROVED'` and `BigInt(totalMinor) > BigInt(softReviewThresholdMinor)` (while `<= BigInt(instruction.max_total_minor)`), route the operation to `FIXTURE_AWAITING_REVIEW` and create a `PENDING` `approvals` row instead of auto-completing (`AC-06`).
+
+#### Item M2-R4: Enforce `vendor_quote_lifecycle` & Quote Expiry in Approval Routes (`apps/api/src/server.ts`)
+- **Problem**: `GET /api/v1/approvals/:id` and `POST /api/v1/approvals/:id/fixture-decision` (`apps/api/src/server.ts` lines 2008–2095) do not check `vendor_quote_lifecycle.state` or `q.expires_at > now()`.
+- **Required Fix**:
+  1. Left-join `vendor_quote_lifecycle l ON l.owner_id = q.owner_id AND l.quote_id = q.id` in both `GET /api/v1/approvals/:id` and `POST /api/v1/approvals/:id/fixture-decision`.
+  2. In `POST /api/v1/approvals/:id/fixture-decision` (and `POST /api/v1/approvals/:id/decide` alias if exposed):
+     - If `l.state === 'INVALIDATED'` or `Number(approval.permissionVersion) !== Number(approval.currentPermissionVersion)`, return `409 STALE_AGREEMENT_VERSION` (or `409 QUOTE_INVALIDATED`).
+     - If `l.state === 'EXPIRED'` or `new Date(approval.quoteExpiresAt) <= new Date()` or `approval.approvalStatus !== 'PENDING'` or `new Date(approval.expiresAt) <= new Date()`, return `410 APPROVAL_EXPIRED_OR_DECIDED`.
+  3. Expose `POST /api/v1/approvals/:id/decide` as an alias/canonical route alongside `POST /api/v1/approvals/:id/fixture-decision` so both the M1 fixture test and M2 acceptance suite work seamlessly.
+
+#### Item M2-R5: Create Dedicated PostgreSQL M2 Acceptance Suite (`scripts/test-m2-discovery-quote-workflow.mjs`)
+- **Problem**: `package.json` currently aliases `"test:m2"` to `"npm run test:domain && npm run test:m1:workflow"`. There is no dedicated M2 PostgreSQL verification script testing `AC-04`, `AC-05`, `AC-06`, and `AC-11`.
+- **Required Fix**:
+  1. Create `scripts/test-m2-discovery-quote-workflow.mjs` and wire `"test:m2": "npm run test:domain && npm run build:api && npm run build:worker && node --env-file-if-exists=.env scripts/test-m2-discovery-quote-workflow.mjs"` in `package.json`.
+  2. The script must verify against PostgreSQL:
+     - **Discovery & Deduplication (`AC-05`, `FR-01`)**: Tiered ranking returns at most 3 unique candidates (`BUDGET_PREFERRED` / `PRIVATE_HISTORY` / `CATALOGUE`), does not duplicate a supplier that is both in `member_suppliers` and `budget_supplier_preferences`, and enforces strict cross-member isolation.
+     - **Category Criteria Validation & Rejection (`AC-04`)**:
+       - `PRODUCT`: rejects quantity `0` or missing variant/returnPolicy.
+       - `BILL`: rejects `unpaidStatus: 'PAID'` or malformed billing cycle.
+       - `ACCOMMODATION`: rejects `checkOut <= checkIn`, `0` guests/rooms, or missing cancellation terms.
+     - **No-Match Watch Continuation (`AC-04`)**: A watch instruction that evaluates a non-matching candidate records no quote/approval, remains `ACTIVE`, and advances `next_run_at` to continue waiting until `valid_until`.
+     - **Authoritative Quote Arithmetic, Hash & Snippet Rejection (`AC-05`)**:
+       - Rejects `SEARCH_SNIPPET` / `ESTIMATE` evidence from creating an executable quote (`422 NON_AUTHORITATIVE_DISCOVERY_EVIDENCE`).
+       - Rejects unreconciled minor-unit arithmetic (`subtotal + tax + shipping + fees - discount !== total`) with `422 UNRECONCILED_QUOTE_ARITHMETIC` and currency mismatch with `422 CURRENCY_MISMATCH`.
+       - Persists a valid authoritative quote with exact SHA-256 `content_hash` and `vendor_quote_lifecycle` state `ACTIVE`.
+     - **Arusha Stay Watch-to-Review & Soft Threshold (`AC-06`)**:
+       - Matching `REVIEW_REQUIRED` Arusha accommodation watch creates 1 `FIXTURE_AWAITING_REVIEW` operation, 1 immutable quote, 1 `PENDING` approval, and 1 durable notification.
+       - `PRE_APPROVED` quote above `softReviewThresholdMinor` (but `<= max_total_minor`) routes to `FIXTURE_AWAITING_REVIEW` instead of auto-completing.
+       - `NOTIFY_ONLY` never creates an approval or executes a purchase.
+     - **One-Time Approvals, Read-Only Deep Link, Expiry Sweeper & Amendment Invalidation (`AC-11`)**:
+       - `GET /api/v1/approvals/:id` is strictly read-only (`status` remains `PENDING`).
+       - Amending instruction configuration/agreement bumps `permission_version`, marks `approvals.status = 'INVALIDATED'` and `vendor_quote_lifecycle.state = 'INVALIDATED'`, and blocks subsequent approval decisions with `409` / `410`.
+       - Concurrent approve vs. reject race (`Promise.all`) accepts exactly 1 winner (`200`) and rejects the loser (`410`/`412`).
+       - Worker expiry sweeper transitions expired quotes/approvals to `EXPIRED` and emits expiry notifications.
+
+### 4.3 Pass 2 Remediation Status
+
+All five Pass 2 blockers are implemented and covered by the dedicated `npm run test:m2` suite:
+
+- **M2-R1 — Complete**: Discovery deduplicates by supplier ID. A private supplier preferred in the active budget is represented once and promoted with the budget preference rank. The top three limit and cross-member isolation are covered.
+- **M2-R2 — Complete for fixture quote intake**: `POST /api/v1/instructions/:id/quotes` is owner-scoped and idempotent. It rejects non-authoritative evidence, invalid category details and instruction mismatches, unreconciled totals, currency mismatches, and totals above the instruction ceiling. Valid quote records use the canonical hash and immutable fixture quote storage; review approvals and notifications are persisted. The route always reports `fixtureOnly: true` and never calls a vendor or payment provider.
+- **M2-R3 — Complete for fixture watches**: Fixture watches accept `NOTIFY_ONLY`, `REVIEW_REQUIRED`, and `PRE_APPROVED` with `ONCE` or `INTERVAL` schedules. No-match observations continue until expiry without creating operations, quotes, or approvals. Matching review watches create quote and approval records; notify-only watches do not. Pre-approved totals above the configured soft threshold wait for review.
+- **M2-R4 — Complete**: Read and decision routes check quote lifecycle and expiry. `/decide` aliases the existing fixture decision route. Stale agreements return `409`; expired or already-decided approvals return `410`.
+- **M2-R5 — Complete**: `test:m2` runs the domain contracts and the PostgreSQL workflow scenarios through `scripts/test-m2-discovery-quote-workflow.mjs`.
+
+**Observed verification, 2 November 2026:** `npm run test:m2` passed 8 domain tests and the PostgreSQL fixture workflow, including supplier deduplication, quote evidence/arithmetic/currency/ceiling checks, approval read-only and concurrent decisions, amendment invalidation, quote expiry sweep, watch matching/no-match continuation, and soft-threshold routing. `test:m0`, `test:ac03`, `test:auth`, and the 101-assertion acceptance matrix also passed. External execution remains disabled. This closes the five listed code blockers; it does not establish provider-sourced authoritative quotes or production checkout capability.
+
+---
+
+## 5. Verification & Exit Checklist
 
 | Checkpoint | Target Contract | Verification Suite / Evidence |
 | :--- | :--- | :--- |
 | **AC-04 Pass** | Category constraints strictly validated; incorrect/ambiguous candidates never quote; no-match watches continue | `npm run test:m2` + `npm run test:domain` |
-| **AC-05 Pass** | Exact minor-unit arithmetic; cryptographic quote hash; search snippets alone cannot purchase | `npm run test:m2` + `packages/domain/test/quotes.test.ts` |
-| **AC-06 Pass** | Review-required match creates pending approval; pre-approved executes only within scope; notify-only never purchases | `npm run test:m2` + `npm run test:acceptance` |
-| **AC-11 Pass** | Material scope change invalidates consent; opening notification/modal is read-only; replay rejected | `npm run test:m2` + `npm run test:acceptance` (Suite C16) |
-| **Private Isolation** | Cross-member discovery or supplier leak strictly returns 404/403 | PostgreSQL isolation queries in `test-m2-discovery-quote-workflow.mjs` |
+| **AC-05 Pass** | Exact minor-unit arithmetic; cryptographic quote hash; search snippets alone cannot purchase | `npm run test:m2` + `packages/domain/test/domain.test.js` |
+| **AC-06 Pass** | Review-required match creates pending approval; pre-approved executes only within scope & soft threshold; notify-only never purchases | `npm run test:m2` + `npm run test:acceptance` |
+| **AC-11 Pass** | Material scope change invalidates consent; opening notification/modal is read-only; concurrent race & replay rejected | `npm run test:m2` + `npm run test:acceptance` (Suite C16) |
+| **Private Isolation** | Cross-member discovery or supplier leak strictly returns 404/403; no duplicate supplier in top-3 shortlist | PostgreSQL isolation queries in `test-m2-discovery-quote-workflow.mjs` |
 | **Full Regression** | Zero regressions across M0, M1, and web build | `npm run test:m0`, `test:ac03`, `test:m1:workflow`, `test:auth`, `npm run build` |
 
 ---
 
-## 5. Mandatory Collaboration Lifecycle Gate
+## 6. Mandatory Collaboration Lifecycle Gate
 
 Per [`AGENTS.md`](../AGENTS.md):
 > **Mandatory Collaboration Lifecycle**: Always follow **Problem → Solution → Plan → Signed → Implementation**.
 > Halt and wait for user sign-off ("signed" / "proceed") before applying modifications.
 
-**Action Required**: Please review this implementation plan. Respond with **"signed"** or **"proceed"** to authorize executing Milestone M2.
+**Pass 2 remediation hand-off**: M2-R1 through M2-R5 were implemented and verified as recorded in § 4.3. M2 remains fixture-verified with external execution disabled; provider-sourced quote capability and production gates remain open.

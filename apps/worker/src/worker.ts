@@ -1,6 +1,7 @@
 import { hostname } from 'node:os';
 import { createHash } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
+import { validateProductCriteria, validateBillCriteria, validateAccommodationCriteria, reconcileQuoteTotals, computeQuoteHash } from '../../../packages/domain/src/index';
 
 type JobType = 'OBSERVE' | 'RUN_OCCURRENCE' | 'RECONCILE' | 'NOTIFY' | 'CANCEL_RECONCILE';
 
@@ -300,6 +301,7 @@ async function processOccurrence(job: DurableJob): Promise<void> {
       validFrom: Date | null; validUntil: Date | null; completionLimit: number | null;
       fulfilledCount: number; maximum: string | null; currency: string | null;
       permissionVersion: number | string; categoryDetails: Record<string, unknown> | null;
+      softReviewThresholdMinor: string | null;
       fundingMandateId: string | null; vendorAccountId: string | null;
     }>(
       `SELECT category, kind, mode, state, execution_environment AS environment,
@@ -308,6 +310,7 @@ async function processOccurrence(job: DurableJob): Promise<void> {
               max_total_minor::text AS maximum, currency,
               permission_version AS "permissionVersion",
               structured_constraints->'categoryDetails' AS "categoryDetails",
+              structured_constraints->>'softReviewThresholdMinor' AS "softReviewThresholdMinor",
               funding_mandate_id AS "fundingMandateId",
               vendor_account_id AS "vendorAccountId"
        FROM procurement_instructions WHERE id = $1 AND owner_id = $2 FOR UPDATE`,
@@ -413,14 +416,17 @@ async function processOccurrence(job: DurableJob): Promise<void> {
         [adapter.rows[0].id, `fixture-${occurrenceId}`],
       )).rows[0]?.id ?? null;
       if (!quoteId) throw new Error('FIXTURE_QUOTE_PERSISTENCE_FAILED');
-      const operationState = instruction.mode === 'REVIEW_REQUIRED' ? 'FIXTURE_AWAITING_REVIEW'
+      const softThreshold = instruction.softReviewThresholdMinor ?? instruction.categoryDetails['softReviewThresholdMinor'];
+      const aboveSoftThreshold = instruction.mode === 'PRE_APPROVED' && typeof softThreshold === 'string' && /^\d+$/.test(softThreshold) && BigInt(total) > BigInt(softThreshold);
+      const needsReview = instruction.mode === 'REVIEW_REQUIRED' || aboveSoftThreshold;
+      const operationState = needsReview ? 'FIXTURE_AWAITING_REVIEW'
         : instruction.mode === 'PRE_APPROVED' ? 'FIXTURE_COMPLETED' : 'FIXTURE_QUOTED';
       await db.query(
         `UPDATE purchase_operations SET selected_quote_id = $3, state = $4, version = version + 1, updated_at = now()
          WHERE id = $1 AND owner_id = $2`,
         [operationRow.id, job.owner_id, quoteId, operationState],
       );
-      if (instruction.mode === 'PRE_APPROVED') {
+      if (instruction.mode === 'PRE_APPROVED' && !needsReview) {
         await db.query(
           `UPDATE procurement_instructions
            SET fulfilled_count = CASE
@@ -432,7 +438,7 @@ async function processOccurrence(job: DurableJob): Promise<void> {
           [instructionId, job.owner_id],
         );
       }
-      if (instruction.mode === 'REVIEW_REQUIRED') {
+      if (needsReview) {
         const approvalExpiry = await db.query<{ expires_at: Date }>(
           `INSERT INTO approvals (owner_id, operation_id, quote_id, quote_hash, permission_version, status, expires_at)
            VALUES ($1, $2, $3, $4, $5, 'PENDING', now() + interval '1 day')
@@ -485,10 +491,13 @@ async function processObservation(job: DurableJob): Promise<void> {
       validFrom: Date | null; validUntil: Date | null; description: string;
       permissionVersion: number | string;
       fundingMandateId: string | null; vendorAccountId: string | null;
+      maxTotalMinor: string | null; currency: string | null; constraints: Record<string, unknown>; watchConfig: Record<string, unknown> | null;
     }>(
       `SELECT category, kind, mode, state, execution_environment AS environment,
               valid_from AS "validFrom", valid_until AS "validUntil",
               structured_constraints->>'description' AS description,
+              structured_constraints AS constraints, max_total_minor::text AS "maxTotalMinor", currency,
+              watch_config AS "watchConfig",
               permission_version AS "permissionVersion",
               funding_mandate_id AS "fundingMandateId",
               vendor_account_id AS "vendorAccountId"
@@ -520,7 +529,7 @@ async function processObservation(job: DurableJob): Promise<void> {
       if (!mandateStatus || mandateStatus === 'REVOKED' || mandateStatus === 'EXPIRED') return block('MANDATE_REVOKED');
       if (mandateStatus === 'REAUTH_REQUIRED') return block('REAUTH_REQUIRED');
     }
-    if (instruction.kind !== 'WATCH' || instruction.mode !== 'NOTIFY_ONLY') return block('WATCH_PERMISSION_UNSUPPORTED');
+    if (instruction.kind !== 'WATCH' || !['NOTIFY_ONLY', 'REVIEW_REQUIRED', 'PRE_APPROVED'].includes(instruction.mode)) return block('WATCH_PERMISSION_UNSUPPORTED');
     const dueAt = new Date(dueAtValue);
     if ((instruction.validFrom && dueAt < instruction.validFrom) || (instruction.validUntil && dueAt > instruction.validUntil)) return block('OUTSIDE_VALIDITY_WINDOW');
     const adapter = await db.query<{ id: string }>(
@@ -529,22 +538,113 @@ async function processObservation(job: DurableJob): Promise<void> {
          AND enabled = true AND execution_enabled = false AND status = 'VERIFIED'`,
     );
     if (!adapter.rows[0]) return block('FIXTURE_ADAPTER_UNAVAILABLE');
-    const normalized = { fixture: true, label: 'Synthetic local observation · no real vendor search', category: instruction.category };
+    const candidateInput = (job.payload['candidateOffer'] && typeof job.payload['candidateOffer'] === 'object' ? job.payload['candidateOffer'] : instruction.constraints['watchCandidate']) as Record<string, unknown> | undefined;
+    let noMatchReason: string | null = null;
+    let acceptedCandidate: Record<string, unknown> | null = null;
+    if (candidateInput || instruction.mode !== 'NOTIFY_ONLY') {
+      if (!candidateInput || candidateInput['matches'] === false) noMatchReason = 'NO_MATCH';
+      else {
+        const typedDetails = candidateInput['typedDetails'];
+        const validation = instruction.category === 'PRODUCT' ? validateProductCriteria(typedDetails)
+          : instruction.category === 'BILL' ? validateBillCriteria(typedDetails) : validateAccommodationCriteria(typedDetails);
+        if (!validation.valid) noMatchReason = 'CATEGORY_CRITERIA_MISMATCH';
+        else {
+          const expected = instruction.constraints['categoryDetails'] && typeof instruction.constraints['categoryDetails'] === 'object'
+            ? instruction.constraints['categoryDetails'] as Record<string, unknown> : {};
+          const actual = typedDetails as Record<string, unknown>;
+          const fieldPairs = instruction.category === 'PRODUCT' ? [['variant', 'variant'], ['quantity', 'quantity']]
+            : instruction.category === 'BILL' ? [['payeeName', 'payeeName'], ['accountRef', 'accountRef'], ['invoiceRef', 'invoiceRef'], ['unpaidStatus', 'unpaidStatus']]
+              : [['destination', 'destination'], ['checkIn', 'checkIn'], ['checkOut', 'checkOut'], ['guests', 'guests'], ['rooms', 'rooms']];
+          if (fieldPairs.some(([expectedKey, actualKey]) => expected[expectedKey] !== undefined
+            && String(expected[expectedKey]).trim().toLowerCase() !== String(actual[actualKey] ?? '').trim().toLowerCase())) noMatchReason = 'CATEGORY_CRITERIA_MISMATCH';
+          const amount = candidateInput['amounts'] as Record<string, unknown> | undefined;
+          const currency = typeof amount?.['currency'] === 'string' ? amount['currency'] : '';
+          const quoteInput = amount ? {
+            sourceQuoteKey: String(candidateInput['sourceQuoteKey'] ?? job.dedupe_key),
+            subtotalMinor: String(amount['subtotalMinor'] ?? ''), taxMinor: String(amount['taxMinor'] ?? '0'),
+            shippingMinor: String(amount['shippingMinor'] ?? '0'), feesMinor: String(amount['feesMinor'] ?? '0'),
+            discountMinor: String(amount['discountMinor'] ?? '0'), totalMinor: String(amount['totalMinor'] ?? ''),
+            currency, payee: String(candidateInput['merchantRef'] ?? 'Local fixture merchant'), terms: candidateInput['terms'] ?? {},
+          } : null;
+          if (noMatchReason) { /* Keep the candidate classified as a criteria mismatch. */ }
+          else if (!quoteInput || !instruction.currency || !instruction.maxTotalMinor || !reconcileQuoteTotals(quoteInput, instruction.currency.trim()).valid) noMatchReason = 'INVALID_QUOTE';
+          else if (BigInt(quoteInput.totalMinor) > BigInt(instruction.maxTotalMinor)) noMatchReason = 'QUOTE_EXCEEDS_MAX_TOTAL';
+          else acceptedCandidate = { ...candidateInput, typedDetails, quoteInput };
+        }
+      }
+    }
+    const normalized = noMatchReason
+      ? { fixture: true, outcome: 'NO_MATCH', reason: noMatchReason, category: instruction.category, candidate: candidateInput ?? null }
+      : acceptedCandidate
+        ? { fixture: true, outcome: 'MATCH', category: instruction.category, candidate: acceptedCandidate }
+        : { fixture: true, label: 'Synthetic local observation · no real vendor search', category: instruction.category };
     const fingerprint = createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
     const observation = await db.query<{ id: string }>(
       `INSERT INTO offer_observations
         (owner_id, instruction_id, adapter_id, source_offer_key, material_fingerprint,
          observed_at, freshness_until, normalized_details, source_url)
-       VALUES ($1, $2, $3, 'local-fixture:synthetic-observation', $4, now(), now() + interval '1 day', $5::jsonb, 'fixture://local/observation')
+       VALUES ($1, $2, $3, $4, $5, now(), now() + interval '1 day', $6::jsonb, 'fixture://local/observation')
        ON CONFLICT (instruction_id, source_offer_key, material_fingerprint) DO NOTHING RETURNING id`,
-      [job.owner_id, instructionId, adapter.rows[0].id, fingerprint, JSON.stringify(normalized)],
+      [job.owner_id, instructionId, adapter.rows[0].id, String(candidateInput?.['sourceQuoteKey'] ?? 'local-fixture:synthetic-observation'), fingerprint, JSON.stringify(normalized)],
     );
     const observationId = observation.rows[0]?.id ?? (await db.query<{ id: string }>(
       `SELECT id FROM offer_observations WHERE instruction_id = $1
-       AND source_offer_key = 'local-fixture:synthetic-observation' AND material_fingerprint = $2`,
-      [instructionId, fingerprint],
+       AND source_offer_key = $2 AND material_fingerprint = $3`,
+      [instructionId, String(candidateInput?.['sourceQuoteKey'] ?? 'local-fixture:synthetic-observation'), fingerprint],
     )).rows[0]?.id;
     if (!observationId) throw new Error('FIXTURE_OBSERVATION_PERSISTENCE_FAILED');
+    if (noMatchReason) {
+      const expired = Boolean(instruction.validUntil && instruction.validUntil <= new Date());
+      const intervalMinutes = instruction.watchConfig?.['frequency'] === 'INTERVAL'
+        ? Math.max(5, Math.min(1440, Number(instruction.watchConfig['intervalMinutes']) || 60)) : 60;
+      await db.query(`UPDATE procurement_instructions SET state = CASE WHEN $3 THEN 'EXPIRED'::instruction_state ELSE state END,
+        next_run_at = CASE WHEN $3 THEN NULL ELSE LEAST(valid_until, now() + ($4::int * interval '1 minute')) END, updated_at = now()
+        WHERE id = $1 AND owner_id = $2 AND state = 'ACTIVE'`, [instructionId, job.owner_id, expired, intervalMinutes]);
+      await db.query(`INSERT INTO audit_events (actor_type, actor_id, owner_id, instruction_id, action, new_state, safe_reason, correlation_id)
+        VALUES ('WORKER', $1, $2, $3, 'WATCH_NO_MATCH_CONTINUING', $4, $5, $6)`, [workerId, job.owner_id, instructionId, expired ? 'EXPIRED' : 'ACTIVE', noMatchReason, job.dedupe_key]);
+      await finishJob(db, job, 'WATCH_NO_MATCH_CONTINUING', { instructionId, observationId, reason: noMatchReason, expired });
+      return observationId;
+    }
+    if (acceptedCandidate && instruction.mode !== 'NOTIFY_ONLY') {
+      const quoteInput = acceptedCandidate['quoteInput'] as {
+        sourceQuoteKey: string; subtotalMinor: string; taxMinor: string; shippingMinor: string; feesMinor: string;
+        discountMinor: string; totalMinor: string; currency: string; payee: string; terms: unknown;
+      };
+      const termsHash = createHash('sha256').update(JSON.stringify(quoteInput.terms)).digest('hex');
+      const contentHash = computeQuoteHash(quoteInput);
+      const details = acceptedCandidate['typedDetails'] as Record<string, unknown>;
+      const obligation = await db.query<{ id: string }>(`INSERT INTO procurement_obligations (owner_id, instruction_id, obligation_key, category, fulfillment_slot)
+        VALUES ($1, $2, $3, $4::instruction_category, $3) ON CONFLICT (instruction_id, obligation_key) DO UPDATE SET updated_at = now() RETURNING id`,
+        [job.owner_id, instructionId, `WATCH:${quoteInput.sourceQuoteKey}`, instruction.category]);
+      const operation = await db.query<{ id: string }>(`INSERT INTO purchase_operations (owner_id, instruction_id, obligation_id, state, permission_version, execution_key)
+        VALUES ($1, $2, $3, 'FIXTURE_QUOTED', $4, $5) ON CONFLICT (owner_id, instruction_id, obligation_id) DO UPDATE SET updated_at = now() RETURNING id`,
+        [job.owner_id, instructionId, obligation.rows[0]!.id, instruction.permissionVersion, `watch:${instructionId}:${quoteInput.sourceQuoteKey}`]);
+      const quote = await db.query<{ id: string }>(`INSERT INTO vendor_quotes
+        (owner_id, operation_id, adapter_id, adapter_version, environment, merchant_ref, external_quote_ref, category, schema_version, typed_details, currency,
+         subtotal_minor, tax_minor, fees_minor, shipping_minor, discount_minor, total_minor, quantity, terms_hash, content_hash, verified_at, expires_at)
+        SELECT $1, $2, $3, va.adapter_version, 'FIXTURE', $4, $5, $6::instruction_category, 'm2-watch-1.0', $7::jsonb, $8,
+               $9, $10, $11, $12, $13, $14, $15, $16, $17, now(), now() + interval '24 hours'
+        FROM vendor_adapters va WHERE va.id = $3
+        ON CONFLICT (adapter_id, environment, external_quote_ref) DO NOTHING RETURNING id`,
+        [job.owner_id, operation.rows[0]!.id, adapter.rows[0].id, quoteInput.payee, quoteInput.sourceQuoteKey, instruction.category, JSON.stringify(details), quoteInput.currency,
+          quoteInput.subtotalMinor, quoteInput.taxMinor, quoteInput.feesMinor, quoteInput.shippingMinor, quoteInput.discountMinor, quoteInput.totalMinor, Number(details['quantity'] ?? 1), termsHash, contentHash]);
+      const quoteId = quote.rows[0]?.id ?? (await db.query<{ id: string }>('SELECT id FROM vendor_quotes WHERE adapter_id = $1 AND environment = \'FIXTURE\' AND external_quote_ref = $2', [adapter.rows[0].id, quoteInput.sourceQuoteKey])).rows[0]?.id;
+      if (!quoteId) throw new Error('WATCH_QUOTE_PERSISTENCE_FAILED');
+      const threshold = instruction.constraints['softReviewThresholdMinor'] ?? (instruction.constraints['categoryDetails'] as Record<string, unknown> | undefined)?.['softReviewThresholdMinor'];
+      const needsReview = instruction.mode === 'REVIEW_REQUIRED' || (instruction.mode === 'PRE_APPROVED' && threshold !== undefined && BigInt(quoteInput.totalMinor) > BigInt(String(threshold)));
+      const operationState = needsReview ? 'FIXTURE_AWAITING_REVIEW' : instruction.mode === 'PRE_APPROVED' ? 'FIXTURE_COMPLETED' : 'FIXTURE_QUOTED';
+      await db.query('UPDATE purchase_operations SET selected_quote_id = $3, state = $4, version = version + 1, updated_at = now() WHERE id = $1 AND owner_id = $2', [operation.rows[0]!.id, job.owner_id, quoteId, operationState]);
+      if (instruction.mode === 'PRE_APPROVED' && !needsReview) await db.query(`UPDATE procurement_instructions SET fulfilled_count = CASE
+        WHEN completion_limit IS NOT NULL THEN LEAST(completion_limit, fulfilled_count + 1) ELSE fulfilled_count + 1 END, updated_at = now()
+        WHERE id = $1 AND owner_id = $2`, [instructionId, job.owner_id]);
+      if (needsReview) {
+        const approval = await db.query<{ id: string }>(`INSERT INTO approvals (owner_id, operation_id, quote_id, quote_hash, permission_version, status, expires_at)
+          VALUES ($1, $2, $3, $4, $5, 'PENDING', now() + interval '24 hours') ON CONFLICT DO NOTHING RETURNING id`, [job.owner_id, operation.rows[0]!.id, quoteId, contentHash, instruction.permissionVersion]);
+        if (approval.rows[0]) await db.query(`INSERT INTO notifications (owner_id, operation_id, instruction_id, event_key, type, safe_content)
+          VALUES ($1, $2, $3, $4, 'FIXTURE_REVIEW_REQUESTED', $5::jsonb) ON CONFLICT (event_key) DO NOTHING`,
+          [job.owner_id, operation.rows[0]!.id, instructionId, `watch-review:${operation.rows[0]!.id}`, JSON.stringify({ label: 'LOCAL FIXTURE ONLY', message: 'A matching fixture watch offer is ready for review. No order was placed.', quoteId, approvalId: approval.rows[0].id })]);
+      }
+    }
     await db.query(
       `INSERT INTO notifications (owner_id, instruction_id, event_key, type, safe_content)
        VALUES ($1, $2, $3, 'FIXTURE_OBSERVATION', $4::jsonb) ON CONFLICT (event_key) DO NOTHING`,
@@ -615,7 +715,7 @@ async function processJob(job: DurableJob): Promise<void> {
 }
 
 async function expireStaleApprovals(): Promise<void> {
-  if (Date.now() - lastApprovalExpirySweep < 60_000) return;
+  if (Date.now() - lastApprovalExpirySweep < 5_000) return;
   lastApprovalExpirySweep = Date.now();
   await pool.query(`WITH expired_quotes AS (
       UPDATE vendor_quote_lifecycle l SET state = 'EXPIRED', changed_at = now()
@@ -629,8 +729,10 @@ async function expireStaleApprovals(): Promise<void> {
       FROM expired_quotes ON CONFLICT (event_key) DO NOTHING
     ), expired AS (
       UPDATE approvals a SET status = 'EXPIRED', decided_at = now(), version = a.version + 1
-      FROM purchase_operations o
-      WHERE a.operation_id = o.id AND a.owner_id = o.owner_id AND a.status = 'PENDING' AND a.expires_at <= now()
+      FROM purchase_operations o JOIN vendor_quotes q ON q.operation_id = o.id AND q.owner_id = o.owner_id
+      LEFT JOIN vendor_quote_lifecycle l ON l.owner_id = q.owner_id AND l.quote_id = q.id
+      WHERE a.operation_id = o.id AND a.owner_id = o.owner_id AND a.quote_id = q.id AND a.status = 'PENDING'
+        AND (a.expires_at <= now() OR q.expires_at <= now() OR l.state = 'EXPIRED')
       RETURNING a.owner_id, a.id AS approval_id, a.operation_id, o.instruction_id
     ), blocked AS (
       UPDATE purchase_operations o SET state = 'BLOCKED', outcome_reason = 'APPROVAL_EXPIRED', version = o.version + 1, updated_at = now()

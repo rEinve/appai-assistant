@@ -245,6 +245,11 @@ async function main() {
     result = await savePreferences(owner.cookie, [ownerSupplierTwoId, ownerSupplierOneId]);
     assert.equal(result.response.status, 200, `save ranked supplier preferences: ${JSON.stringify(result.json)}`);
     assert.deepEqual(result.json.supplierIds, [ownerSupplierTwoId, ownerSupplierOneId], 'saved preference order is returned');
+    const deduplicatedDiscovery = await request(`/api/v1/discovery/candidates?category=PRODUCT&area=Arusha&budgetId=${budgetId}`, { cookie: owner.cookie });
+    const deduplicatedIds = deduplicatedDiscovery.json.candidates.map((candidate) => candidate.id);
+    assert.equal(new Set(deduplicatedIds).size, deduplicatedIds.length, 'a private supplier preferred in the budget occupies only one shortlist slot');
+    assert.equal(deduplicatedIds[0], ownerSupplierOneId, 'budget preferred history is promoted and deduplicated');
+    assert.ok(deduplicatedDiscovery.json.candidates.length <= 3, 'deduplicated discovery remains capped at three');
     const rankedBudgets = await request('/api/v1/budgets', { cookie: owner.cookie });
     const rankedBudget = rankedBudgets.json.budgets.find((item) => item.id === budgetId);
     assert.deepEqual(rankedBudget.preferredSuppliers, [
@@ -344,7 +349,7 @@ async function main() {
     const validConfiguration = {
       description: promptText, memberCategory: 'OTHER', budgetId, maximumTotal: '250.00',
       validFromLocal: local(now), validUntilLocal: local(until), timezone: 'UTC',
-      categoryDetails: { quantity: 1, variant: 'Fixture variant', deliveryBy: '' },
+      categoryDetails: { quantity: 1, variant: 'Fixture variant', deliveryBy: '', deliveryWindow: '2027-01-01', returnPolicy: '30 days' },
     };
     const tooHigh = await request(`/api/v1/instructions/${instructionId}/configuration`, {
       method: 'PATCH', cookie: owner.cookie, headers: { 'If-Match': `"${version}"` },
@@ -428,6 +433,42 @@ async function main() {
     assert.equal(approved.json.operationState, 'FIXTURE_APPROVED');
     assert.equal(approved.json.fixtureOnly, true);
 
+    const quoteDetails = { variant: 'Fixture variant', quantity: 1, deliveryWindow: '2027-01-01', returnPolicy: '30 days' };
+    const quotePayload = {
+      evidenceType: 'AUTHORITATIVE_QUOTE', sourceQuoteKey: `m2-source-${suffix}`, merchantRef: 'Fixture merchant', typedDetails: quoteDetails, quantity: 1,
+      terms: { returnPolicy: '30 days' }, amounts: { subtotalMinor: '18000', taxMinor: '2000', shippingMinor: '0', feesMinor: '0', discountMinor: '0', totalMinor: '20000', currency: 'USD' },
+    };
+    const estimatedEvidence = await request(`/api/v1/instructions/${instructionId}/quotes`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() }, body: { ...quotePayload, evidenceType: 'ESTIMATE' } });
+    assert.equal(estimatedEvidence.response.status, 422, 'non-authoritative estimate cannot create a quote');
+    assert.equal(estimatedEvidence.json.code, 'NON_AUTHORITATIVE_DISCOVERY_EVIDENCE');
+    const arithmeticMismatch = await request(`/api/v1/instructions/${instructionId}/quotes`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() }, body: { ...quotePayload, amounts: { ...quotePayload.amounts, totalMinor: '19999' } } });
+    assert.equal(arithmeticMismatch.json.code, 'UNRECONCILED_QUOTE_ARITHMETIC');
+    const currencyMismatch = await request(`/api/v1/instructions/${instructionId}/quotes`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() }, body: { ...quotePayload, amounts: { ...quotePayload.amounts, currency: 'TZS' } } });
+    assert.equal(currencyMismatch.json.code, 'CURRENCY_MISMATCH');
+    const criteriaMismatch = await request(`/api/v1/instructions/${instructionId}/quotes`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() }, body: { ...quotePayload, typedDetails: { ...quoteDetails, variant: 'Different variant' } } });
+    assert.equal(criteriaMismatch.json.code, 'CATEGORY_CRITERIA_MISMATCH');
+    const exceedsCeiling = await request(`/api/v1/instructions/${instructionId}/quotes`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() }, body: { ...quotePayload, amounts: { ...quotePayload.amounts, subtotalMinor: '30000', taxMinor: '0', totalMinor: '30000' } } });
+    assert.equal(exceedsCeiling.json.code, 'QUOTE_EXCEEDS_MAX_TOTAL');
+    const quoteKey = randomUUID();
+    const createdQuote = await request(`/api/v1/instructions/${instructionId}/quotes`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': quoteKey }, body: quotePayload });
+    assert.equal(createdQuote.response.status, 201, `authoritative fixture quote accepted: ${JSON.stringify(createdQuote.json)}`);
+    assert.equal(createdQuote.json.fixtureOnly, true, 'quote creation is explicitly fixture-only');
+    const createdQuoteRetry = await request(`/api/v1/instructions/${instructionId}/quotes`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': quoteKey }, body: quotePayload });
+    assert.equal(createdQuoteRetry.response.status, 200, 'quote creation retry replays the saved result');
+    assert.equal(createdQuoteRetry.json.quoteId, createdQuote.json.quoteId);
+    const quoteState = await pool.query('SELECT state FROM vendor_quote_lifecycle WHERE owner_id = $1 AND quote_id = $2', [ownerId, createdQuote.json.quoteId]);
+    assert.equal(quoteState.rows[0].state, 'ACTIVE', 'new immutable quote starts with active lifecycle state');
+    const concurrentDecisions = await Promise.all(['APPROVE', 'REJECT'].map((decision) => request(`/api/v1/approvals/${createdQuote.json.approvalId}/decide`, {
+      method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID(), 'If-Match': '"1"' }, body: { decision },
+    })));
+    assert.equal(concurrentDecisions.filter((item) => item.response.status === 200).length, 1, 'concurrent approve/reject race accepts exactly one winner');
+    assert.ok(concurrentDecisions.every((item) => [200, 410, 412].includes(item.response.status)), 'concurrent loser is rejected as decided or stale');
+
+    const expiredQuote = await request(`/api/v1/instructions/${instructionId}/quotes`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() }, body: { ...quotePayload, sourceQuoteKey: `m2-expiry-${suffix}` } });
+    assert.equal(expiredQuote.response.status, 201);
+    await pool.query("UPDATE vendor_quote_lifecycle SET state = 'EXPIRED', changed_at = now() WHERE owner_id = $1 AND quote_id = $2", [ownerId, expiredQuote.json.quoteId]);
+    const expiredDecision = await request(`/api/v1/approvals/${expiredQuote.json.approvalId}/decide`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID(), 'If-Match': '"1"' }, body: { decision: 'APPROVE' } });
+    assert.equal(expiredDecision.response.status, 410, 'expired quote lifecycle blocks approval');
     const job = await pool.query('SELECT id FROM jobs WHERE instruction_id = $1 AND job_type = \'RUN_OCCURRENCE\' ORDER BY created_at DESC LIMIT 1', [instructionId]);
     assert.equal(job.rowCount, 1);
     jobId = job.rows[0].id;
@@ -447,6 +488,17 @@ async function main() {
     }, 'expired lease recovery after worker restart');
     await stop(restartedWorker);
 
+    const invalidatedQuote = await request(`/api/v1/instructions/${instructionId}/quotes`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() }, body: { ...quotePayload, sourceQuoteKey: `m2-invalidated-${suffix}` } });
+    assert.equal(invalidatedQuote.response.status, 201);
+    const beforeAmendment = await request('/api/v1/instructions', { cookie: owner.cookie });
+    const amendmentVersion = beforeAmendment.json.instructions.find((item) => item.id === instructionId).version;
+    const amended = await request(`/api/v1/instructions/${instructionId}/configuration`, { method: 'PATCH', cookie: owner.cookie, headers: { 'If-Match': `"${amendmentVersion}"` }, body: { ...validConfiguration, description: 'Amended after quote review' } });
+    assert.equal(amended.response.status, 200, 'material instruction amendment persists');
+    const staleApprovalRead = await request(`/api/v1/approvals/${invalidatedQuote.json.approvalId}`, { cookie: owner.cookie });
+    assert.equal(staleApprovalRead.response.status, 409, 'approval inspection blocks a stale agreement quote');
+    const staleApprovalDecision = await request(`/api/v1/approvals/${invalidatedQuote.json.approvalId}/decide`, { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID(), 'If-Match': '"1"' }, body: { decision: 'APPROVE' } });
+    assert.equal(staleApprovalDecision.response.status, 409, 'amendment invalidation blocks a stale quote decision');
+
     const identities = await pool.query(
       `SELECT (SELECT count(*)::int FROM instruction_occurrences WHERE instruction_id = $1) AS occurrences,
               (SELECT count(*)::int FROM procurement_obligations WHERE instruction_id = $1) AS obligations,
@@ -455,7 +507,7 @@ async function main() {
               (SELECT count(*)::int FROM approvals WHERE operation_id = $2) AS approvals`,
       [instructionId, operationId],
     );
-    assert.deepEqual(identities.rows[0], { occurrences: 1, obligations: 1, operations: 1, quotes: 1, approvals: 1 }, 'restart replay keeps each domain identity unique');
+    assert.deepEqual(identities.rows[0], { occurrences: 1, obligations: 4, operations: 4, quotes: 1, approvals: 1 }, 'restart replay keeps the occurrence identity unique alongside separately keyed M2 quote operations');
     let instructionState = await request('/api/v1/instructions', { cookie: owner.cookie });
     let lifecycleInstruction = instructionState.json.instructions.find((item) => item.id === instructionId);
     assert.equal(lifecycleInstruction.state, 'ACTIVE');
@@ -539,7 +591,7 @@ async function main() {
       body: {
         description: 'Pre-approved fixture product simulation', memberCategory: 'OTHER',
         budgetId, maximumTotal: '50.00', validFromLocal: local(validFrom), validUntilLocal: local(validUntil), timezone: 'UTC',
-        categoryDetails: { quantity: 1, variant: 'Simulated', deliveryBy: '' },
+        categoryDetails: { quantity: 1, variant: 'Simulated', deliveryBy: '' }, softReviewThresholdMinor: '1000',
       },
     });
     assert.equal(result.response.status, 200, `pre-approved fixture configuration: ${JSON.stringify(result.json)}`);
@@ -553,7 +605,8 @@ async function main() {
       const activity = await request('/api/v1/activity', { cookie: owner.cookie });
       return activity.json.operations?.find((item) => item.instructionId === preApprovedId) ?? null;
     }, 'pre-approved fixture simulation');
-    assert.equal(preApprovedOperation.state, 'FIXTURE_COMPLETED');
+    assert.equal(preApprovedOperation.state, 'FIXTURE_AWAITING_REVIEW', 'PRE_APPROVED quote above the soft review threshold requires explicit review');
+    assert.equal(preApprovedOperation.approvalStatus, 'PENDING');
     assert.match(preApprovedOperation.quoteDetails.label, /not a real offer/i);
 
     result = await request('/api/v1/instructions', {
@@ -588,6 +641,94 @@ async function main() {
     }, 'synthetic notify-only watch observation');
     assert.equal(watchObservation.details.fixture, true);
     assert.match(watchObservation.details.label, /no real vendor search/i);
+    const notifyOnlyOutcomes = await pool.query(`SELECT count(DISTINCT o.id)::int AS operations, count(DISTINCT a.id)::int AS approvals
+      FROM procurement_instructions i LEFT JOIN purchase_operations o ON o.instruction_id = i.id LEFT JOIN approvals a ON a.operation_id = o.id WHERE i.id = $1`, [watchId]);
+    assert.deepEqual(notifyOnlyOutcomes.rows[0], { operations: 0, approvals: 0 }, 'NOTIFY_ONLY watch never creates purchase operations or approvals');
+
+    let reviewWatch = await request('/api/v1/instructions', { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() }, body: {
+      description: 'Review only when the Arusha stay matches all agreed criteria', kind: 'WATCH', category: 'ACCOMMODATION', mode: 'REVIEW_REQUIRED', budgetId,
+    } });
+    assert.equal(reviewWatch.response.status, 201, `review watch draft: ${JSON.stringify(reviewWatch.json)}`);
+    const reviewWatchId = reviewWatch.json.instruction.id;
+    const reviewWatchConfig = await request(`/api/v1/instructions/${reviewWatchId}/configuration`, { method: 'PATCH', cookie: owner.cookie, headers: { 'If-Match': `"${reviewWatch.json.instruction.version}"` }, body: {
+      description: 'Review only when the Arusha stay matches all agreed criteria', memberCategory: 'OTHER', budgetId, maximumTotal: '100.00',
+      validFromLocal: local(validFrom), validUntilLocal: local(validUntil), timezone: 'UTC', watchFrequency: 'INTERVAL', watchIntervalMinutes: 5,
+      categoryDetails: { destination: 'Arusha', checkIn: '2027-02-14', checkOut: '2027-02-16', guests: 2, rooms: 1, cancellationPreference: 'ANY' },
+    } });
+    assert.equal(reviewWatchConfig.response.status, 200, `review watch configuration: ${JSON.stringify(reviewWatchConfig.json)}`);
+    const reviewWatchDraft = await request('/api/v1/instructions', { cookie: owner.cookie });
+    const reviewWatchVersion = reviewWatchDraft.json.instructions.find((item) => item.id === reviewWatchId).version;
+    const activateReviewWatch = await request(`/api/v1/instructions/${reviewWatchId}/activate-fixture`, { method: 'POST', cookie: owner.cookie,
+      headers: { 'Idempotency-Key': randomUUID(), 'If-Match': `"${reviewWatchVersion}"` }, body: {},
+    });
+    assert.equal(activateReviewWatch.response.status, 200, `review watch activation: ${JSON.stringify(activateReviewWatch.json)}`);
+    const noMatch = await waitFor(async () => {
+      const row = await pool.query(`SELECT i.state, i.next_run_at, count(DISTINCT o.id)::int AS operations, count(DISTINCT a.id)::int AS approvals
+        FROM procurement_instructions i LEFT JOIN purchase_operations o ON o.instruction_id = i.id LEFT JOIN approvals a ON a.operation_id = o.id
+        WHERE i.id = $1 GROUP BY i.id`, [reviewWatchId]);
+      const audit = await pool.query("SELECT 1 FROM audit_events WHERE instruction_id = $1 AND action = 'WATCH_NO_MATCH_CONTINUING'", [reviewWatchId]);
+      return audit.rowCount ? { ...row.rows[0], audited: true } : null;
+    }, 'review watch no-match continuation');
+    assert.equal(noMatch.state, 'ACTIVE', 'unmatched review watch remains active within its validity window');
+    assert.ok(new Date(noMatch.next_run_at) > new Date(), 'unmatched review watch is scheduled to continue polling');
+    assert.equal(noMatch.operations, 0, 'no-match watch creates no purchase operation');
+    assert.equal(noMatch.approvals, 0, 'no-match watch creates no approval');
+
+    const fixtureAdapter = await pool.query("SELECT id, adapter_version FROM vendor_adapters WHERE adapter_key = 'local-fixture' AND environment = 'FIXTURE' LIMIT 1");
+    const staleContentHash = createHash('sha256').update(`expired-quote-${suffix}`).digest('hex');
+    const staleTermsHash = createHash('sha256').update('expired-terms').digest('hex');
+    const staleQuote = await pool.query(`INSERT INTO vendor_quotes
+      (owner_id, operation_id, adapter_id, adapter_version, environment, merchant_ref, external_quote_ref, category, schema_version, typed_details, currency,
+       subtotal_minor, tax_minor, fees_minor, shipping_minor, discount_minor, total_minor, quantity, terms_hash, content_hash, verified_at, expires_at)
+      VALUES ($1, $2, $3, $4, 'FIXTURE', 'fixture-expired-merchant', $5, 'PRODUCT', 'm2-expiry-test', '{}'::jsonb, 'USD',
+       1000, 0, 0, 0, 0, 1000, 1, $6, $7, now() - interval '2 days', now() - interval '1 day') RETURNING id`,
+      [ownerId, operationId, fixtureAdapter.rows[0].id, fixtureAdapter.rows[0].adapter_version, `expired-${suffix}`, staleTermsHash, staleContentHash]);
+    const staleApproval = await pool.query(`INSERT INTO approvals (owner_id, operation_id, quote_id, quote_hash, permission_version, status, expires_at)
+      SELECT $1, $2, $3, $4, permission_version, 'PENDING', now() + interval '1 day' FROM procurement_instructions WHERE id = $5 AND owner_id = $1 RETURNING id`,
+      [ownerId, operationId, staleQuote.rows[0].id, staleContentHash, instructionId]);
+    const expirySweep = await waitFor(async () => {
+      const state = await pool.query(`SELECT l.state AS quote_state, a.status AS approval_status
+        FROM vendor_quote_lifecycle l JOIN approvals a ON a.quote_id = l.quote_id AND a.owner_id = l.owner_id
+        WHERE l.owner_id = $1 AND l.quote_id = $2 AND a.id = $3`, [ownerId, staleQuote.rows[0].id, staleApproval.rows[0].id]);
+      return state.rows[0]?.quote_state === 'EXPIRED' && state.rows[0]?.approval_status === 'EXPIRED' ? state.rows[0] : null;
+    }, 'expired quote and approval sweep', 250);
+    assert.deepEqual(expirySweep, { quote_state: 'EXPIRED', approval_status: 'EXPIRED' }, 'worker expiry sweep transitions quote lifecycle and approval together');
+
+    await stop(workerChild);
+    const matchingWatch = await request('/api/v1/instructions', { method: 'POST', cookie: owner.cookie, headers: { 'Idempotency-Key': randomUUID() }, body: {
+      description: 'Review a matching Arusha stay offer', kind: 'WATCH', category: 'ACCOMMODATION', mode: 'REVIEW_REQUIRED', budgetId,
+    } });
+    assert.equal(matchingWatch.response.status, 201);
+    const matchingWatchId = matchingWatch.json.instruction.id;
+    const matchingConfig = await request(`/api/v1/instructions/${matchingWatchId}/configuration`, { method: 'PATCH', cookie: owner.cookie, headers: { 'If-Match': `"${matchingWatch.json.instruction.version}"` }, body: {
+      description: 'Review a matching Arusha stay offer', memberCategory: 'OTHER', budgetId, maximumTotal: '100.00',
+      validFromLocal: local(validFrom), validUntilLocal: local(validUntil), timezone: 'UTC',
+      categoryDetails: { destination: 'Arusha', checkIn: '2027-02-14', checkOut: '2027-02-16', guests: 2, rooms: 1, cancellationPreference: 'ANY' },
+    } });
+    assert.equal(matchingConfig.response.status, 200);
+    const matchingVersion = matchingConfig.json.instruction.version;
+    const matchingActivation = await request(`/api/v1/instructions/${matchingWatchId}/activate-fixture`, { method: 'POST', cookie: owner.cookie,
+      headers: { 'Idempotency-Key': randomUUID(), 'If-Match': `"${matchingVersion}"` }, body: {},
+    });
+    assert.equal(matchingActivation.response.status, 200);
+    await pool.query('UPDATE procurement_instructions SET next_run_at = NULL WHERE id = $1 AND owner_id = $2', [matchingWatchId, ownerId]);
+    const candidateOffer = {
+      sourceQuoteKey: `match-${suffix}`, merchantRef: 'Fixture Arusha stay', typedDetails: { destination: 'Arusha', checkIn: '2027-02-14', checkOut: '2027-02-16', guests: 2, rooms: 1, rateType: 'standard', cancellationTerms: 'Free cancellation until 24 hours before arrival' },
+      amounts: { subtotalMinor: '6000', taxMinor: '0', shippingMinor: '0', feesMinor: '0', discountMinor: '0', totalMinor: '6000', currency: 'USD' }, terms: { cancellationTerms: 'Free cancellation until 24 hours before arrival' },
+    };
+    const candidateJobKey = `m2-watch-match:${matchingWatchId}:${suffix}`;
+    const matchingScheduleVersion = await pool.query('SELECT permission_version FROM procurement_instructions WHERE id = $1 AND owner_id = $2', [matchingWatchId, ownerId]);
+    await pool.query(`INSERT INTO jobs (owner_id, instruction_id, job_type, dedupe_key, payload, run_at)
+      VALUES ($1, $2, 'OBSERVE', $3, $4::jsonb, now())`, [ownerId, matchingWatchId, candidateJobKey, JSON.stringify({ occurrenceKey: `m2:${suffix}`, dueAt: new Date().toISOString(), scheduleVersion: Number(matchingScheduleVersion.rows[0].permission_version), candidateOffer })]);
+    startWorker(1);
+    const matchingOperation = await waitFor(async () => {
+      const activity = await request('/api/v1/activity', { cookie: owner.cookie });
+      return activity.json.operations?.find((item) => item.instructionId === matchingWatchId) ?? null;
+    }, 'matching accommodation watch quote');
+    assert.equal(matchingOperation.state, 'FIXTURE_AWAITING_REVIEW', 'matching review-required watch creates a review operation');
+    assert.equal(matchingOperation.approvalStatus, 'PENDING', 'matching review-required watch creates a pending approval');
+    const matchCount = await pool.query(`SELECT count(*)::int AS count FROM vendor_quotes q JOIN purchase_operations o ON o.id = q.operation_id WHERE o.instruction_id = $1`, [matchingWatchId]);
+    assert.equal(matchCount.rows[0].count, 1, 'matching watch produces exactly one quote');
 
     const adapter = await pool.query("SELECT execution_enabled FROM vendor_adapters WHERE adapter_key = 'local-fixture' AND environment = 'FIXTURE'");
     assert.equal(adapter.rows[0].execution_enabled, false, 'fixture adapter never enables provider execution');
