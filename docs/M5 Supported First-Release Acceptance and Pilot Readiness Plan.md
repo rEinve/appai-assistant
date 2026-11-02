@@ -145,6 +145,8 @@ Per [`AGENTS.md`](../AGENTS.md):
 
 M5 implementation and local PostgreSQL acceptance are GREEN-LIT. The full evidence and operational limits are recorded in the [M5 Pilot Readiness and Operations Runbook](M5-PILOT-READINESS-AND-OPERATIONS-RUNBOOK.md).
 
+- Implementation checkpoint: `5c9000b` (`Implement M5 pilot readiness safeguards`) on `main`.
+
 - `npm run test:m5`: passed. Domain tests 11/11; API and worker TypeScript builds passed; database immutability triggers rejected both `UPDATE` and `DELETE` with SQLSTATE `55000`; expired unlinked idempotency was pruned while an expired entry linked to a `RECONCILING` operation remained; step-up denied sensitive policy updates until password confirmation; deactivation blocked future work while retaining a `RECONCILING` operation, active reservation, reconciliation job and audit/ledger history.
 - Final measured local fixture SLAs: reservation preparation p95 **59.80 ms** (target ≤200 ms), authenticated API acknowledgement p95 **78.53 ms** (target ≤1,000 ms), due-job pickup **1,000 ms** (target ≤60,000 ms). Ten concurrent operations against a 5,000 minor-unit budget admitted exactly five 1,000-unit purchases; total spend/reservations equaled 5,000 minor units.
 - Full database `pg_dump`/`pg_restore` rehearsal passed in a temporary database. Purchase operation, active reservation, attempt, outbox and idempotency record counts matched the source; the temporary database and dump were removed.

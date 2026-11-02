@@ -81,6 +81,8 @@ The member area supports invite-only sign-in, prompt-first instruction drafts, a
 
 **M5 is GREEN-LIT in local PostgreSQL and deterministic fixture mode.** Live execution remains disabled; production TLS, email delivery/recovery, and live provider capability evidence remain open.
 
+- **Implementation checkpoint:** `5c9000b` (`Implement M5 pilot readiness safeguards`) on `main`.
+
 - Migration 018 seeds retention policies, records retention runs, adds session-bound step-up records and first job start timestamps, and rejects `UPDATE`/`DELETE` on audit and budget ledger rows.
 - API adds the operator pilot-readiness manifest and safe retention runner, 15-minute password-confirmed step-up, sensitive-action gates, and account deactivation that preserves unresolved liabilities and financial history.
 - Worker records a job's first claim timestamp. Reservation responses report internal reservation preparation latency for SLA evidence.
