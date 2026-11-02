@@ -53,10 +53,19 @@ The member area supports invite-only sign-in, prompt-first instruction drafts, a
   - **`AC-11`**: Read-only approval inspection (`GET /api/v1/approvals/:id`), single-winner concurrent decision fencing (`POST /api/v1/approvals/:id/decide`), `vendor_quote_lifecycle` (`014`–`015`) expiry sweeping, and material instruction amendment invalidation (`409 STALE_AGREEMENT_VERSION` / `410 APPROVAL_EXPIRED_OR_DECIDED`).
 - **Final checkpoint, 2 November 2026:** Commit `e7e276f` on `main`. All verification suites pass: `npm run test:m2`, `npm run test:m0`, `npm run test:ac03`, `npm run test:auth`, `npm run test:paypal` (3/3), `npm run test:domain` (8/8), `npm run test:acceptance` (101/101), and `npm run build` (0 errors). Provider-sourced live vendor quote normalization and production checkout capability remain gated under external execution controls.
 
-## Next acceptance and implementation sequence (M2 / M3)
+## M3 Closeout Status
 
-1. **Advance to M2 Category Validation, Discovery Normalization & Authoritative Quotes (`AC-04`, `AC-05`, `AC-06`, `AC-11`).** Validate category constraints (product variant/quantity/delivery; bill account/invoice/cycle/unpaid status; stay dates/guests/room/rate/cancellation). Implement vendor final quote verification, shipping/tax/fees arithmetic, discovery adapter normalization/freshness, and approval quote-hash binding.
-2. **Enforce M3 Hard Spending Caps & Atomic Reservations (`AC-07`, `AC-08`, `AC-09`, `AC-10`).** Implement concurrent reservation/dispatch limits across shared budgets, confirmed refund recovery, and idempotency across network loss and worker lease expiration.
-3. **Production Operations & Recovery Follow-ups (`M4`).** Configure email delivery for verification/password recovery, step-up re-authentication for sensitive payment changes, production TLS/HTTPS termination, and live PayPal webhook processing.
+**M3 (`AC-07`–`AC-10`) is implemented and verified in local PostgreSQL with deterministic local fixture execution. Provider sandbox checkout and live execution remain disabled.**
+
+- Migration `016` adds versioned owner budget policies and daily windows, atomic reservations, spend/refund entries, execution attempts, external order outcomes, and refunds. Cross-instruction bill obligation uniqueness is enforced in PostgreSQL.
+- The Domain, API, and Worker enforce hard caps independently of approval, fence policy changes, reserve shared capacity under database locks, persist a stable request key before execution, hold unknown or partial outcomes for reconciliation, and restore budget only for confirmed refunds. Local dispatch requires explicit `APPAI_EXECUTION_MODE=local-sandbox`; the API continues to report `liveExecutionEnabled: false`.
+- **Verification, 2 November 2026:** `npm run test:m3` passed (domain 9/9, API/worker builds, PostgreSQL M3 acceptance). `npm run test:m0`, `npm run test:m2` (including M1 fixture workflow), `npm run test:ac03`, `npm run test:auth`, `npm run test:paypal` (3/3), `npm run test:acceptance` (101/101), and `npm run build` also passed. PostgreSQL suites used local `127.0.0.1:5433`; execution evidence is deterministic fixture-only. Full details are in [M3 implementation and acceptance report](M3%20Atomic%20Reservations%20and%20Safe%20Sandbox%20Execution%20Plan.md).
+- M0 regression found and fixed during verification: legacy fixture `RECONCILE` jobs without an operation ID now retain their prior completion behavior, while operation-backed M3 reconciliation uses the stable key. M0 rerun passed.
+- **Checkpoint:** pending commit creation in this closeout; commit hash will be recorded here after the signed M3 files are committed on `main`.
+
+## Next acceptance and implementation sequence (M4)
+
+1. **Production Operations & Recovery Follow-ups (`M4`).** Configure email delivery for verification/password recovery, step-up re-authentication for sensitive payment changes, production TLS/HTTPS termination, and live PayPal webhook processing.
+2. **Provider capability gates.** Gather separate vendor-sandbox checkout evidence and capability approval before enabling any provider-backed execution. Local fixture results do not establish sandbox or live support.
 
 For each item, mark **implemented**, **database/fixture passed**, **sandbox passed**, or **live enabled** separately, and add the command/environment, test data, observed result and evidence link to [M1 evidence](M1-EVIDENCE.md) or the relevant milestone report. M1 core requirements (AC-01, AC-03, and the M1 portions of AC-14) are verified and closed; real execution and external purchases remain gated.

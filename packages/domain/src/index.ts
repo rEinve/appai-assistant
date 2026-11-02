@@ -92,6 +92,69 @@ export function reconcileQuoteTotals(quote: CanonicalQuoteInput, expectedCurrenc
   if (expectedCurrency && quote.currency !== expectedCurrency) issues.push(issue('CURRENCY_MISMATCH', 'currency', 'Quote currency must match the instruction and budget.'));
   return { valid: issues.length === 0, issues };
 }
+
+export interface SpendingPolicyEvaluationInput {
+  quoteCurrency: string;
+  instructionCurrency: string;
+  budgetCurrency: string;
+  policyCurrency: string;
+  totalMinor: string;
+  unitPriceMinor: string;
+  quantity: number;
+  instructionMaxTotalMinor: string;
+  perOrderHardLimitMinor: string;
+  unitLimitMinor?: string | null;
+  availableBudgetMinor: string;
+  availableDailyMinor: string;
+  /** Informational only; approval never changes hard-cap evaluation. */
+  approvalStatus?: string;
+}
+
+const MAX_MINOR = 9_223_372_036_854_775_807n;
+
+export function evaluateSpendingPolicy(input: SpendingPolicyEvaluationInput): ValidationResult {
+  const issues: ValidationIssue[] = [];
+  const currencies = [input.quoteCurrency, input.instructionCurrency, input.budgetCurrency, input.policyCurrency];
+  if (currencies.some(currency => !CURRENCY.test(currency)) || currencies.some(currency => currency !== currencies[0])) {
+    issues.push(issue('CURRENCY_MISMATCH', 'currency', 'Quote, instruction, budget, and policy currencies must match.'));
+  }
+  const moneyFields: Array<[string, string]> = [
+    ['totalMinor', input.totalMinor], ['unitPriceMinor', input.unitPriceMinor],
+    ['instructionMaxTotalMinor', input.instructionMaxTotalMinor], ['perOrderHardLimitMinor', input.perOrderHardLimitMinor],
+    ['availableBudgetMinor', input.availableBudgetMinor], ['availableDailyMinor', input.availableDailyMinor],
+    ...(input.unitLimitMinor == null ? [] : [['unitLimitMinor', input.unitLimitMinor] as [string, string]]),
+  ];
+  const amounts = new Map<string, bigint>();
+  for (const [field, value] of moneyFields) {
+    if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+      issues.push(issue('INVALID_MONEY', field, `${field} must be a non-negative minor-unit string.`));
+      continue;
+    }
+    const amount = BigInt(value);
+    if (amount > MAX_MINOR) issues.push(issue('INVALID_MONEY', field, `${field} exceeds the supported PostgreSQL bigint range.`));
+    else amounts.set(field, amount);
+  }
+  if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) issues.push(issue('INVALID_QUANTITY', 'quantity', 'Quantity must be a positive safe integer.'));
+
+  const total = amounts.get('totalMinor');
+  const unit = amounts.get('unitPriceMinor');
+  const perOrder = amounts.get('perOrderHardLimitMinor');
+  const instructionMax = amounts.get('instructionMaxTotalMinor');
+  const availableBudget = amounts.get('availableBudgetMinor');
+  const availableDaily = amounts.get('availableDailyMinor');
+  const unitLimit = amounts.get('unitLimitMinor');
+  if (total !== undefined && total <= 0n) issues.push(issue('INVALID_MONEY', 'totalMinor', 'Payable total must be greater than zero.'));
+  if (unit !== undefined && unit <= 0n) issues.push(issue('INVALID_MONEY', 'unitPriceMinor', 'Unit price must be greater than zero.'));
+  if (perOrder !== undefined && perOrder <= 0n) issues.push(issue('INVALID_MONEY', 'perOrderHardLimitMinor', 'Per-order limit must be greater than zero.'));
+  if (instructionMax !== undefined && instructionMax <= 0n) issues.push(issue('INVALID_MONEY', 'instructionMaxTotalMinor', 'Instruction ceiling must be greater than zero.'));
+  if (unit !== undefined && unitLimit !== undefined && unit > unitLimit) issues.push(issue('UNIT_CAP_EXCEEDED', 'unitPriceMinor', 'Unit price exceeds the policy unit limit.'));
+  if (total !== undefined && perOrder !== undefined && total > perOrder) issues.push(issue('ORDER_HARD_CAP_EXCEEDED', 'totalMinor', 'Payable total exceeds the per-order hard limit.'));
+  if (total !== undefined && instructionMax !== undefined && total > instructionMax) issues.push(issue('INSTRUCTION_CAP_EXCEEDED', 'totalMinor', 'Payable total exceeds the instruction ceiling.'));
+  if (total !== undefined && availableBudget !== undefined && total > availableBudget) issues.push(issue('INSUFFICIENT_BUDGET_CAPACITY', 'totalMinor', 'Payable total exceeds available shared budget capacity.'));
+  if (total !== undefined && availableDaily !== undefined && total > availableDaily) issues.push(issue('DAILY_LIMIT_EXCEEDED', 'totalMinor', 'Payable total exceeds available daily capacity.'));
+  return { valid: issues.length === 0, issues };
+}
+
 export function computeQuoteHash(quote: CanonicalQuoteInput): string {
   const canonicalize = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalize) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, canonicalize(child)])) : value;
   const canonical = JSON.stringify(canonicalize({ sourceQuoteKey: quote.sourceQuoteKey, subtotalMinor: quote.subtotalMinor, taxMinor: quote.taxMinor, shippingMinor: quote.shippingMinor, feesMinor: quote.feesMinor, discountMinor: quote.discountMinor, totalMinor: quote.totalMinor, currency: quote.currency, payee: quote.payee, terms: quote.terms }));

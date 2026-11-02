@@ -9,5 +9,5 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["apps/api/src/**/*.ts", "packages/adapters/paypal-sandbox/src/**/*.ts"]
+  "include": ["apps/api/src/**/*.ts", "packages/adapters/paypal-sandbox/src/**/*.ts", "packages/execution/src/**/*.ts", "packages/domain/src/**/*.ts"]
 }

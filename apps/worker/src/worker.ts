@@ -2,6 +2,7 @@ import { hostname } from 'node:os';
 import { createHash } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import { validateProductCriteria, validateBillCriteria, validateAccommodationCriteria, reconcileQuoteTotals, computeQuoteHash } from '../../../packages/domain/src/index';
+import { applyLocalSandboxOutcome, prepareLocalExecution, reconcileLocalSandboxExecution } from '../../../packages/execution/src/reservations';
 
 type JobType = 'OBSERVE' | 'RUN_OCCURRENCE' | 'RECONCILE' | 'NOTIFY' | 'CANCEL_RECONCILE';
 
@@ -24,6 +25,7 @@ const workerId = process.env['WORKER_ID'] ?? `${hostname()}-${process.pid}`;
 const pollMs = boundedInteger(process.env['WORKER_POLL_MS'], 1000, 100, 30_000);
 const leaseMs = boundedInteger(process.env['WORKER_LEASE_MS'], 30_000, 5_000, 300_000);
 const batchSize = boundedInteger(process.env['WORKER_BATCH_SIZE'], 4, 1, 32);
+const localSandboxExecutionEnabled = process.env['APPAI_EXECUTION_MODE'] === 'local-sandbox';
 const pool = new Pool({ connectionString: databaseUrl, max: batchSize + 2, application_name: `appai-worker-${workerId}` });
 
 let stopping = false;
@@ -367,17 +369,26 @@ async function processOccurrence(job: DurableJob): Promise<void> {
     if (!occurrenceId) throw new Error('OCCURRENCE_PERSISTENCE_FAILED');
 
     const obligationKey = `${instruction.kind}:${occurrenceKey}`;
+    const billAccountRef = instruction.category === 'BILL' && typeof instruction.categoryDetails['accountRef'] === 'string'
+      ? instruction.categoryDetails['accountRef'].trim() : null;
+    const billInvoiceRef = instruction.category === 'BILL'
+      ? (typeof instruction.categoryDetails['invoiceOrCycleRef'] === 'string' ? instruction.categoryDetails['invoiceOrCycleRef'].trim()
+        : typeof instruction.categoryDetails['invoiceRef'] === 'string' ? instruction.categoryDetails['invoiceRef'].trim() : null)
+      : null;
+    const billCycleRef = instruction.category === 'BILL' && typeof instruction.categoryDetails['billingCycle'] === 'string'
+      ? instruction.categoryDetails['billingCycle'].trim() : null;
     const obligationInsert = await db.query<{ id: string }>(
-      `INSERT INTO procurement_obligations (owner_id, instruction_id, occurrence_id, obligation_key, category, fulfillment_slot)
-       VALUES ($1, $2, $3, $4, $5::instruction_category, $6)
-       ON CONFLICT (instruction_id, obligation_key) DO NOTHING RETURNING id`,
-      [job.owner_id, instructionId, occurrenceId, obligationKey, instruction.category, occurrenceKey],
+      `INSERT INTO procurement_obligations (owner_id, instruction_id, occurrence_id, obligation_key, category, fulfillment_slot,
+          external_account_ref, external_invoice_ref, external_cycle_ref)
+       VALUES ($1, $2, $3, $4, $5::instruction_category, $6, $7, $8, $9)
+       ON CONFLICT DO NOTHING RETURNING id`,
+      [job.owner_id, instructionId, occurrenceId, obligationKey, instruction.category, occurrenceKey, billAccountRef, billInvoiceRef, billCycleRef],
     );
     const obligationId = obligationInsert.rows[0]?.id ?? (await db.query<{ id: string; occurrence_id: string | null }>(
       'SELECT id, occurrence_id FROM procurement_obligations WHERE instruction_id = $1 AND obligation_key = $2 FOR UPDATE',
       [instructionId, obligationKey],
     )).rows[0]?.id;
-    if (!obligationId) throw new Error('OBLIGATION_IDENTITY_CONFLICT');
+    if (!obligationId) return block(instruction.category === 'BILL' ? 'DUPLICATE_BILL_OBLIGATION' : 'OBLIGATION_IDENTITY_CONFLICT');
 
     const operation = await db.query<{ id: string; state: string; selected_quote_id: string | null }>(
       `INSERT INTO purchase_operations (owner_id, instruction_id, obligation_id, state, permission_version, execution_key)
@@ -420,13 +431,13 @@ async function processOccurrence(job: DurableJob): Promise<void> {
       const aboveSoftThreshold = instruction.mode === 'PRE_APPROVED' && typeof softThreshold === 'string' && /^\d+$/.test(softThreshold) && BigInt(total) > BigInt(softThreshold);
       const needsReview = instruction.mode === 'REVIEW_REQUIRED' || aboveSoftThreshold;
       const operationState = needsReview ? 'FIXTURE_AWAITING_REVIEW'
-        : instruction.mode === 'PRE_APPROVED' ? 'FIXTURE_COMPLETED' : 'FIXTURE_QUOTED';
+        : instruction.mode === 'PRE_APPROVED' ? (localSandboxExecutionEnabled ? 'READY' : 'FIXTURE_COMPLETED') : 'FIXTURE_QUOTED';
       await db.query(
         `UPDATE purchase_operations SET selected_quote_id = $3, state = $4, version = version + 1, updated_at = now()
          WHERE id = $1 AND owner_id = $2`,
         [operationRow.id, job.owner_id, quoteId, operationState],
       );
-      if (instruction.mode === 'PRE_APPROVED' && !needsReview) {
+      if (instruction.mode === 'PRE_APPROVED' && !needsReview && !localSandboxExecutionEnabled) {
         await db.query(
           `UPDATE procurement_instructions
            SET fulfilled_count = CASE
@@ -454,7 +465,7 @@ async function processOccurrence(job: DurableJob): Promise<void> {
         await db.query(
           `INSERT INTO notifications (owner_id, operation_id, instruction_id, event_key, type, safe_content)
            VALUES ($1, $2, $3, $4, 'FIXTURE_RESULT', $5::jsonb) ON CONFLICT (event_key) DO NOTHING`,
-          [job.owner_id, operationRow.id, instructionId, `fixture-result:${operationRow.id}`, JSON.stringify({ label: 'LOCAL FIXTURE ONLY', message: instruction.mode === 'PRE_APPROVED' ? 'The fixture path completed without contacting a vendor or moving money.' : 'The fixture quote is recorded. Notify-only instructions never purchase.' })],
+          [job.owner_id, operationRow.id, instructionId, `fixture-result:${operationRow.id}`, JSON.stringify({ label: 'LOCAL FIXTURE ONLY', message: instruction.mode === 'PRE_APPROVED' && localSandboxExecutionEnabled ? 'A deterministic local sandbox execution is queued; no external provider is contacted.' : instruction.mode === 'PRE_APPROVED' ? 'The fixture path completed without contacting a vendor or moving money.' : 'The fixture quote is recorded. Notify-only instructions never purchase.' })],
         );
       }
       await db.query(
@@ -470,10 +481,26 @@ async function processOccurrence(job: DurableJob): Promise<void> {
        ON CONFLICT (aggregate_type, aggregate_id, aggregate_version, event_type) DO NOTHING`,
       [occurrenceId, job.owner_id, JSON.stringify({ instructionId, occurrenceKey, operationId: operationRow.id, fixtureOnly: true })],
     );
-    await finishJob(db, job, 'FIXTURE_JOB_COMPLETED', { instructionId, occurrenceId, operationId: operationRow.id, fixtureOnly: true });
-    return operationRow.state;
+    const finalState = await db.query<{ state: string }>('SELECT state FROM purchase_operations WHERE id=$1 AND owner_id=$2', [operationRow.id, job.owner_id]);
+    const state = finalState.rows[0]?.state ?? operationRow.state;
+    const shouldDispatch = localSandboxExecutionEnabled && instruction.mode === 'PRE_APPROVED'
+      && ['READY', 'SUBMITTING', 'RECONCILING', 'SUCCEEDED'].includes(state);
+    if (!shouldDispatch) await finishJob(db, job, 'FIXTURE_JOB_COMPLETED', { instructionId, occurrenceId, operationId: operationRow.id, fixtureOnly: true });
+    return { operationId: operationRow.id, state, shouldDispatch };
   });
-  if (outcome) console.info(`fixture occurrence processed id=${job.id} state=${outcome}`);
+  if (outcome && typeof outcome !== 'string' && outcome.shouldDispatch) {
+    const prepared = await withCurrentLease(job, db => prepareLocalExecution(db, job.owner_id, outcome.operationId));
+    if (prepared) {
+      if (prepared.status === 'PREPARED' || prepared.status === 'ALREADY_SUBMITTED') {
+        const executed = await withCurrentLease(job, db => applyLocalSandboxOutcome(db, job.owner_id, outcome.operationId, 'NONE'));
+        if (!executed) return;
+      }
+      await withCurrentLease(job, async db => finishJob(db, job, 'LOCAL_SANDBOX_EXECUTION_FINISHED', {
+        instructionId, operationId: outcome.operationId, result: prepared.status, fixtureOnly: true,
+      }));
+    }
+  }
+  if (outcome) console.info(`fixture occurrence processed id=${job.id} state=${typeof outcome === 'string' ? outcome : outcome.state}`);
 }
 
 async function processObservation(job: DurableJob): Promise<void> {
@@ -613,12 +640,25 @@ async function processObservation(job: DurableJob): Promise<void> {
       const termsHash = createHash('sha256').update(JSON.stringify(quoteInput.terms)).digest('hex');
       const contentHash = computeQuoteHash(quoteInput);
       const details = acceptedCandidate['typedDetails'] as Record<string, unknown>;
-      const obligation = await db.query<{ id: string }>(`INSERT INTO procurement_obligations (owner_id, instruction_id, obligation_key, category, fulfillment_slot)
-        VALUES ($1, $2, $3, $4::instruction_category, $3) ON CONFLICT (instruction_id, obligation_key) DO UPDATE SET updated_at = now() RETURNING id`,
-        [job.owner_id, instructionId, `WATCH:${quoteInput.sourceQuoteKey}`, instruction.category]);
+      const billAccountRef = instruction.category === 'BILL' && typeof details['accountRef'] === 'string' ? details['accountRef'].trim() : null;
+      const billInvoiceRef = instruction.category === 'BILL'
+        ? (typeof details['invoiceOrCycleRef'] === 'string' ? details['invoiceOrCycleRef'].trim()
+          : typeof details['invoiceRef'] === 'string' ? details['invoiceRef'].trim() : null) : null;
+      const billCycleRef = instruction.category === 'BILL' && typeof details['billingCycle'] === 'string' ? details['billingCycle'].trim() : null;
+      const obligation = await db.query<{ id: string }>(`INSERT INTO procurement_obligations
+        (owner_id, instruction_id, obligation_key, category, fulfillment_slot, external_account_ref, external_invoice_ref, external_cycle_ref)
+        VALUES ($1, $2, $3, $4::instruction_category, $3, $5, $6, $7) ON CONFLICT DO NOTHING RETURNING id`,
+        [job.owner_id, instructionId, `WATCH:${quoteInput.sourceQuoteKey}`, instruction.category, billAccountRef, billInvoiceRef, billCycleRef]);
+      const obligationId = obligation.rows[0]?.id ?? (await db.query<{ id: string }>(
+        'SELECT id FROM procurement_obligations WHERE owner_id=$1 AND instruction_id=$2 AND obligation_key=$3 FOR UPDATE',
+        [job.owner_id, instructionId, `WATCH:${quoteInput.sourceQuoteKey}`])).rows[0]?.id;
+      if (!obligationId) {
+        await finishJob(db, job, 'DUPLICATE_BILL_OBLIGATION', { instructionId, reason: instruction.category === 'BILL' ? 'DUPLICATE_BILL_OBLIGATION' : 'OBLIGATION_IDENTITY_CONFLICT' });
+        return null;
+      }
       const operation = await db.query<{ id: string }>(`INSERT INTO purchase_operations (owner_id, instruction_id, obligation_id, state, permission_version, execution_key)
         VALUES ($1, $2, $3, 'FIXTURE_QUOTED', $4, $5) ON CONFLICT (owner_id, instruction_id, obligation_id) DO UPDATE SET updated_at = now() RETURNING id`,
-        [job.owner_id, instructionId, obligation.rows[0]!.id, instruction.permissionVersion, `watch:${instructionId}:${quoteInput.sourceQuoteKey}`]);
+        [job.owner_id, instructionId, obligationId, instruction.permissionVersion, `watch:${instructionId}:${quoteInput.sourceQuoteKey}`]);
       const quote = await db.query<{ id: string }>(`INSERT INTO vendor_quotes
         (owner_id, operation_id, adapter_id, adapter_version, environment, merchant_ref, external_quote_ref, category, schema_version, typed_details, currency,
          subtotal_minor, tax_minor, fees_minor, shipping_minor, discount_minor, total_minor, quantity, terms_hash, content_hash, verified_at, expires_at)
@@ -682,16 +722,31 @@ async function processJob(job: DurableJob): Promise<void> {
       await processOccurrence(job);
       return;
     }
-    if ((job.job_type === 'RECONCILE' || job.job_type === 'CANCEL_RECONCILE') && payload['fixtureReconcile'] === true) {
-      await withCurrentLease(job, async (db) => {
-        await finishJob(db, job, 'FIXTURE_RECONCILIATION_COMPLETED', {
-          instructionId: job.instruction_id,
-          operationId: (payload['operationId'] as string | undefined) ?? null,
-          jobType: job.job_type,
-          fixtureOnly: true,
-        });
+    if (job.job_type === 'RECONCILE' && payload['fixtureReconcile'] === true && typeof payload['operationId'] === 'string') {
+      const reconciliation = await withCurrentLease(job, async (db) => {
+        const outcome = await reconcileLocalSandboxExecution(db, job.owner_id, payload['operationId'] as string);
+        if (outcome['status'] !== 'RECONCILING') {
+          await finishJob(db, job, 'FIXTURE_RECONCILIATION_COMPLETED', {
+            instructionId: job.instruction_id, operationId: payload['operationId'], result: outcome, fixtureOnly: true,
+          });
+        }
+        return outcome;
       });
-      console.info(`fixture reconciliation completed id=${job.id} type=${job.job_type}`);
+      if (reconciliation?.['status'] === 'RECONCILING') await retryJob(job, 'PROVIDER_OUTCOME_PENDING');
+      console.info(`fixture reconciliation id=${job.id} operation=${payload['operationId']} state=${String(reconciliation?.['status'] ?? 'LEASE_LOST')}`);
+      return;
+    }
+    if (job.job_type === 'RECONCILE' && payload['fixtureReconcile'] === true) {
+      await withCurrentLease(job, async (db) => finishJob(db, job, 'FIXTURE_RECONCILIATION_COMPLETED', {
+        instructionId: job.instruction_id, operationId: null, fixtureOnly: true,
+      }));
+      return;
+    }
+    if (job.job_type === 'CANCEL_RECONCILE' && payload['fixtureReconcile'] === true) {
+      await withCurrentLease(job, async (db) => finishJob(db, job, 'FIXTURE_RECONCILIATION_COMPLETED', {
+        instructionId: job.instruction_id, operationId: (payload['operationId'] as string | undefined) ?? null,
+        jobType: job.job_type, fixtureOnly: true,
+      }));
       return;
     }
     const reasons: Record<JobType, string> = {

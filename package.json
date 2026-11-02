@@ -18,6 +18,7 @@
     "test:ac03": "npm run build:api && npm run build:worker && node --env-file-if-exists=.env scripts/test-ac03-schedule-matrix.mjs",
     "test:m1:workflow": "npm run build:api && npm run build:worker && node --env-file-if-exists=.env scripts/test-m1-fixture-workflow.mjs",
     "test:m2": "npm run test:domain && npm run build:api && npm run build:worker && node --env-file-if-exists=.env scripts/test-m2-discovery-quote-workflow.mjs",
+    "test:m3": "npm run test:domain && npm run build:api && npm run build:worker && node --env-file-if-exists=.env scripts/test-m3-reservations-and-execution.mjs",
     "build:api": "tsc -p tsconfig.api.json",
     "build:worker": "tsc -p tsconfig.worker.json",
     "test:paypal": "npm run build:api && node --test packages/adapters/paypal-sandbox/test/paypal.test.js",

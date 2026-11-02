@@ -11,6 +11,7 @@ const {
   validateAccommodationCriteria,
   reconcileQuoteTotals,
   computeQuoteHash,
+  evaluateSpendingPolicy,
 } = require('../dist/index.js');
 const { REVIEW_REQUIRED_ACCOMMODATION } = require('../dist/fixture.js');
 
@@ -61,4 +62,28 @@ test('quote contract reconciles exact minor units, currency, and canonical hash'
   assert.ok(reconcileQuoteTotals(quote, 'TZS').issues.some(issue => issue.code === 'CURRENCY_MISMATCH'));
   assert.equal(computeQuoteHash(quote), computeQuoteHash({ ...quote, terms: { cancellation: 'none', return: '30 days' } }));
   assert.notEqual(computeQuoteHash(quote), computeQuoteHash({ ...quote, taxMinor: '999' }));
+});
+
+test('spending policy rejects every hard cap even when approval is already approved', () => {
+  const base = {
+    quoteCurrency: 'USD', instructionCurrency: 'USD', budgetCurrency: 'USD', policyCurrency: 'USD',
+    totalMinor: '4000', unitPriceMinor: '4000', quantity: 1, instructionMaxTotalMinor: '5000',
+    perOrderHardLimitMinor: '5000', unitLimitMinor: '5000', availableBudgetMinor: '5000', availableDailyMinor: '5000',
+    approvalStatus: 'APPROVED',
+  };
+  assert.equal(evaluateSpendingPolicy(base).valid, true);
+  const cases = [
+    [{ ...base, unitPriceMinor: '5001' }, 'UNIT_CAP_EXCEEDED'],
+    [{ ...base, totalMinor: '5001' }, 'ORDER_HARD_CAP_EXCEEDED'],
+    [{ ...base, instructionMaxTotalMinor: '3999' }, 'INSTRUCTION_CAP_EXCEEDED'],
+    [{ ...base, availableBudgetMinor: '3999' }, 'INSUFFICIENT_BUDGET_CAPACITY'],
+    [{ ...base, availableDailyMinor: '3999' }, 'DAILY_LIMIT_EXCEEDED'],
+    [{ ...base, policyCurrency: 'EUR' }, 'CURRENCY_MISMATCH'],
+  ];
+  for (const [input, code] of cases) {
+    const result = evaluateSpendingPolicy(input);
+    assert.equal(result.valid, false, code);
+    assert.ok(result.issues.some(entry => entry.code === code), code);
+  }
+  assert.ok(evaluateSpendingPolicy({ ...base, totalMinor: '9223372036854775808' }).issues.some(entry => entry.code === 'INVALID_MONEY'));
 });

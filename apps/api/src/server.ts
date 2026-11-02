@@ -18,9 +18,11 @@ import {
   reconcileQuoteTotals,
   computeQuoteHash,
 } from '../../../packages/domain/src/index';
+import { applyLocalSandboxOutcome, prepareLocalExecution, type SandboxFaultMode } from '../../../packages/execution/src/reservations';
 
 const port = Number(process.env['APP_PORT'] ?? 4300);
 const mode = process.env['PAYPAL_DEMO_MODE'] ?? 'fixture';
+const localSandboxExecutionEnabled = process.env['APPAI_EXECUTION_MODE'] === 'local-sandbox';
 const webOrigin = process.env['WEB_APP_ORIGIN'] ?? 'http://localhost:4200';
 const extraOrigins = (process.env['TRUSTED_ORIGINS'] ?? '').split(',').map((o) => o.trim()).filter(Boolean);
 const trustedOrigins = new Set([webOrigin, 'http://localhost:4201', 'https://appai.local', 'https://appai.themeshak.com', ...extraOrigins]);
@@ -1684,6 +1686,183 @@ Suggestions require member review and never authorize a purchase or schedule.` }
       }
     }
 
+    if (url.pathname === '/api/v1/budget-policies' && (request.method === 'GET' || request.method === 'PUT')) {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (request.method === 'GET') {
+        const policies = await authRuntime.pool.query(
+          `SELECT id, currency, per_order_hard_limit_minor::text AS "perOrderHardLimitMinor",
+                  daily_limit_minor::text AS "dailyLimitMinor", unit_limit_minor::text AS "unitLimitMinor",
+                  soft_review_threshold_minor::text AS "softReviewThresholdMinor", timezone, version,
+                  created_at AS "createdAt", updated_at AS "updatedAt"
+           FROM budget_policies WHERE owner_id=$1 ORDER BY currency`, [member.id]);
+        return json(response, 200, { policies: policies.rows });
+      }
+      if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      const input = await body(request);
+      const currency = typeof input['currency'] === 'string' ? input['currency'].trim() : '';
+      const perOrder = typeof input['perOrderHardLimitMinor'] === 'string' ? input['perOrderHardLimitMinor'] : '';
+      const daily = typeof input['dailyLimitMinor'] === 'string' ? input['dailyLimitMinor'] : '';
+      const unit = input['unitLimitMinor'] === null || input['unitLimitMinor'] === undefined ? null : input['unitLimitMinor'];
+      const soft = input['softReviewThresholdMinor'] === null || input['softReviewThresholdMinor'] === undefined ? null : input['softReviewThresholdMinor'];
+      const timezone = input['timezone'];
+      const minor = (value: unknown) => typeof value === 'string' && /^\d{1,19}$/.test(value) && BigInt(value) > 0n && BigInt(value) <= 9_223_372_036_854_775_807n;
+      if (!/^[A-Z]{3}$/.test(currency) || !minor(perOrder) || !minor(daily)
+          || (unit !== null && !minor(unit)) || (soft !== null && !minor(soft))
+          || BigInt(perOrder) > BigInt(daily) || (unit !== null && BigInt(String(unit)) > BigInt(perOrder))
+          || (soft !== null && BigInt(String(soft)) > BigInt(perOrder)) || !validTimezone(timezone)) {
+        return json(response, 400, { code: 'INVALID_BUDGET_POLICY', message: 'Provide positive minor-unit limits, consistent hard caps, an ISO currency, and a valid IANA timezone.' });
+      }
+      const db = await authRuntime.pool.connect();
+      try {
+        await db.query('BEGIN');
+        const saved = await db.query<{ id: string; version: string }>(
+          `INSERT INTO budget_policies(owner_id,currency,per_order_hard_limit_minor,daily_limit_minor,unit_limit_minor,soft_review_threshold_minor,timezone)
+           VALUES($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT(owner_id,currency) DO UPDATE SET per_order_hard_limit_minor=EXCLUDED.per_order_hard_limit_minor,
+             daily_limit_minor=EXCLUDED.daily_limit_minor, unit_limit_minor=EXCLUDED.unit_limit_minor,
+             soft_review_threshold_minor=EXCLUDED.soft_review_threshold_minor, timezone=EXCLUDED.timezone,
+             version=budget_policies.version+1, updated_at=now()
+           RETURNING id, version::text AS version`, [member.id, currency, perOrder, daily, unit, soft, timezone]);
+        await db.query(`UPDATE approvals SET status='INVALIDATED', decided_at=now(), version=version+1
+          WHERE owner_id=$1 AND status IN ('PENDING','APPROVED') AND consumed_at IS NULL AND policy_version < $2`,
+          [member.id, saved.rows[0]!.version]);
+        const result = await db.query(`SELECT id, currency, per_order_hard_limit_minor::text AS "perOrderHardLimitMinor",
+            daily_limit_minor::text AS "dailyLimitMinor", unit_limit_minor::text AS "unitLimitMinor",
+            soft_review_threshold_minor::text AS "softReviewThresholdMinor", timezone, version
+          FROM budget_policies WHERE owner_id=$1 AND id=$2`, [member.id, saved.rows[0]!.id]);
+        await db.query('COMMIT');
+        return json(response, 200, { policy: result.rows[0] });
+      } catch (error) { await db.query('ROLLBACK'); throw error; }
+      finally { db.release(); }
+    }
+
+    const reserveDispatchMatch = url.pathname.match(/^\/api\/v1\/operations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/reserve-and-dispatch$/i);
+    if (request.method === 'POST' && reserveDispatchMatch) {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      if (!localSandboxExecutionEnabled) return json(response, 503, { code: 'EXECUTION_DISABLED', liveExecutionEnabled: false });
+      const input = await body(request);
+      const faultModes: SandboxFaultMode[] = ['NONE', 'LOST_RESPONSE_AFTER_SUCCESS', 'CRASH_BEFORE_REFS', 'PAYMENT_CAPTURED_VENDOR_PENDING', 'DEFINITIVE_FAILURE'];
+      const faultMode = faultModes.includes(input['faultMode'] as SandboxFaultMode) ? input['faultMode'] as SandboxFaultMode : 'NONE';
+      const db = await authRuntime.pool.connect();
+      try {
+        await db.query('BEGIN');
+        const prepared = await prepareLocalExecution(db, member.id, reserveDispatchMatch[1]!);
+        await db.query('COMMIT');
+        if (prepared.status === 'BLOCKED') return json(response, 409, { ...prepared, fixtureOnly: true, liveExecutionEnabled: false });
+        if (prepared.status === 'ALREADY_SUBMITTED') return json(response, 200, { ...prepared, fixtureOnly: true, liveExecutionEnabled: false, replay: true });
+        await db.query('BEGIN');
+        const outcome = await applyLocalSandboxOutcome(db, member.id, reserveDispatchMatch[1]!, faultMode);
+        await db.query('COMMIT');
+        return json(response, outcome['status'] === 'FAILED' ? 502 : 200, { ...outcome, reservationId: prepared.reservationId,
+          stableRequestKey: prepared.stableRequestKey, fixtureOnly: true, liveExecutionEnabled: false });
+      } catch (error) {
+        await db.query('ROLLBACK');
+        throw error;
+      } finally { db.release(); }
+    }
+
+    const refundMatch = url.pathname.match(/^\/api\/v1\/operations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/refunds$/i);
+    if (request.method === 'POST' && refundMatch) {
+      if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
+      const member = await resolveMember(authRuntime, request.headers);
+      if (!member) return json(response, 401, { code: 'UNAUTHENTICATED' });
+      if (!originMatches(request.headers.origin)) return json(response, 403, { code: 'ORIGIN_NOT_ALLOWED' });
+      if (!localSandboxExecutionEnabled) return json(response, 503, { code: 'EXECUTION_DISABLED', liveExecutionEnabled: false });
+      const input = await body(request);
+      const externalRef = typeof input['externalRef'] === 'string' ? input['externalRef'].trim() : '';
+      const status = input['status'];
+      const expected = input['expectedAmountMinor'];
+      const confirmed = input['confirmedAmountMinor'];
+      const currency = typeof input['currency'] === 'string' ? input['currency'].trim() : '';
+      const minorAmount = (value: unknown) => typeof value === 'string' && /^\d{1,19}$/.test(value) && BigInt(value) > 0n && BigInt(value) <= 9_223_372_036_854_775_807n;
+      if (externalRef.length < 1 || externalRef.length > 180 || !['PENDING', 'CONFIRMED', 'FAILED'].includes(String(status))
+          || !minorAmount(expected) || (status === 'CONFIRMED' ? !minorAmount(confirmed) : confirmed !== undefined && confirmed !== null)
+          || (status === 'CONFIRMED' && minorAmount(confirmed) && minorAmount(expected) && BigInt(String(confirmed)) > BigInt(String(expected)))
+          || !/^[A-Z]{3}$/.test(currency)) return json(response, 400, { code: 'INVALID_REFUND' });
+      const db = await authRuntime.pool.connect();
+      try {
+        await db.query('BEGIN');
+        const order = await db.query<{ budgetId: string; budgetWindowId: string | null; currency: string; amountMinor: string; spendEntryId: string | null }>(
+          `SELECT r.budget_id AS "budgetId", r.budget_window_id AS "budgetWindowId", r.currency,
+             r.amount_minor::text AS "amountMinor", e.id AS "spendEntryId"
+           FROM purchase_operations o JOIN budget_reservations r ON r.owner_id=o.owner_id AND r.operation_id=o.id
+           LEFT JOIN budget_entries e ON e.owner_id=o.owner_id AND e.operation_id=o.id AND e.kind='SPEND'
+           JOIN external_orders x ON x.owner_id=o.owner_id AND x.operation_id=o.id
+           WHERE o.owner_id=$1 AND o.id=$2 AND o.state='SUCCEEDED' AND x.environment='FIXTURE' FOR UPDATE OF o,r,x`, [member.id, refundMatch[1]]);
+        const original = order.rows[0];
+        if (!original) { await db.query('ROLLBACK'); return json(response, 404, { code: 'CONFIRMED_SPEND_NOT_FOUND' }); }
+        if (original.currency.trim() !== currency) { await db.query('ROLLBACK'); return json(response, 409, { code: 'CURRENCY_MISMATCH' }); }
+        const prior = await db.query<{ id: string; operationId: string; currency: string; status: string; expectedAmount: string; confirmedAmount: string | null }>(
+          `SELECT id,operation_id AS "operationId",currency,status,expected_amount_minor::text AS "expectedAmount",confirmed_amount_minor::text AS "confirmedAmount"
+           FROM refunds WHERE owner_id=$1 AND external_ref=$2 FOR UPDATE`, [member.id, externalRef]);
+        let refundId: string;
+        let createdRefund = false;
+        if (prior.rows[0]) {
+          const old = prior.rows[0];
+          if (old.operationId !== refundMatch[1] || old.currency.trim() !== currency || old.expectedAmount !== expected) {
+            await db.query('ROLLBACK'); return json(response, 409, { code: 'REFUND_REFERENCE_REUSED' });
+          }
+          if (old.status === status && old.confirmedAmount === (confirmed ?? null)) {
+            await db.query('COMMIT'); return json(response, 200, { refundId: old.id, status: old.status, replay: true, fixtureOnly: true });
+          }
+          if (old.status !== 'PENDING' || !['CONFIRMED', 'FAILED'].includes(String(status))) {
+            await db.query('ROLLBACK'); return json(response, 409, { code: 'REFUND_REFERENCE_REUSED' });
+          }
+          const updatedRefund = await db.query<{ id: string }>(`UPDATE refunds SET status=$3, confirmed_amount_minor=$4, last_checked_at=now()
+            WHERE owner_id=$1 AND id=$2 AND status='PENDING' RETURNING id`,
+            [member.id, old.id, status, status === 'CONFIRMED' ? confirmed : null]);
+          refundId = updatedRefund.rows[0]!.id;
+        } else {
+          const refund = await db.query<{ id: string }>(
+            `INSERT INTO refunds(owner_id,operation_id,external_ref,expected_amount_minor,confirmed_amount_minor,currency,status)
+             VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(owner_id,external_ref) DO NOTHING RETURNING id`,
+            [member.id, refundMatch[1], externalRef, expected, status === 'CONFIRMED' ? confirmed : null, currency, status]);
+          if (refund.rows[0]) {
+            refundId = refund.rows[0].id;
+            createdRefund = true;
+          } else {
+            const raced = await db.query<{ id: string; operationId: string; currency: string; status: string; expectedAmount: string; confirmedAmount: string | null }>(
+              `SELECT id,operation_id AS "operationId",currency,status,expected_amount_minor::text AS "expectedAmount",confirmed_amount_minor::text AS "confirmedAmount"
+               FROM refunds WHERE owner_id=$1 AND external_ref=$2 FOR UPDATE`, [member.id, externalRef]);
+            const priorRefund = raced.rows[0];
+            if (!priorRefund || priorRefund.operationId !== refundMatch[1] || priorRefund.currency.trim() !== currency
+                || priorRefund.expectedAmount !== expected || priorRefund.status !== status || priorRefund.confirmedAmount !== (confirmed ?? null)) {
+              await db.query('ROLLBACK'); return json(response, 409, { code: 'REFUND_REFERENCE_REUSED' });
+            }
+            await db.query('COMMIT');
+            return json(response, 200, { refundId: priorRefund.id, status: priorRefund.status, replay: true, fixtureOnly: true });
+          }
+        }
+        if (status === 'CONFIRMED') {
+          const cumulative = await db.query<{ total: string }>(
+            `SELECT COALESCE(SUM(confirmed_amount_minor),0)::text AS total FROM refunds
+             WHERE owner_id=$1 AND operation_id=$2 AND status='CONFIRMED' AND external_ref<>$3`, [member.id, refundMatch[1], externalRef]);
+          if (!original.spendEntryId || BigInt(cumulative.rows[0]!.total) + BigInt(String(confirmed)) > BigInt(original.amountMinor)) {
+            await db.query('ROLLBACK'); return json(response, 409, { code: 'REFUND_EXCEEDS_CONFIRMED_SPEND' });
+          }
+        }
+        if (status === 'CONFIRMED') {
+          await db.query(`INSERT INTO budget_entries(owner_id,budget_id,budget_window_id,operation_id,kind,amount_minor,currency,reference_spend_entry_id,external_event_key)
+            VALUES($1,$2,$3,$4,'REFUND',$5,$6,$7,$8) ON CONFLICT(external_event_key) DO NOTHING`,
+            [member.id, original.budgetId, original.budgetWindowId, refundMatch[1], confirmed, currency, original.spendEntryId, `refund:${refundMatch[1]}:${externalRef}`]);
+          const totals = await db.query<{ spend: string; refund: string }>(
+            `SELECT COALESCE(SUM(CASE WHEN kind='SPEND' THEN amount_minor ELSE 0 END),0)::text AS spend,
+                    COALESCE(SUM(CASE WHEN kind='REFUND' THEN amount_minor ELSE 0 END),0)::text AS refund
+             FROM budget_entries WHERE owner_id=$1 AND operation_id=$2`, [member.id, refundMatch[1]]);
+          const orderStatus = BigInt(totals.rows[0]!.refund) >= BigInt(totals.rows[0]!.spend) ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+          await db.query('UPDATE external_orders SET payment_status=$3, verified_at=now() WHERE owner_id=$1 AND operation_id=$2', [member.id, refundMatch[1], orderStatus]);
+        }
+        await db.query('COMMIT');
+        return json(response, createdRefund ? 201 : 200, { refundId, status, capacityRestored: status === 'CONFIRMED' ? confirmed : '0', fixtureOnly: true, liveExecutionEnabled: false });
+      } catch (error) { await db.query('ROLLBACK'); throw error; }
+      finally { db.release(); }
+    }
+
     const readinessMatch = url.pathname.match(/^\/api\/v1\/instructions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/readiness$/i);
     if (request.method === 'GET' && readinessMatch) {
       if (!authRuntime) return json(response, 503, { code: 'AUTH_UNAVAILABLE' });
@@ -2066,10 +2245,21 @@ Suggestions require member review and never authorize a purchase or schedule.` }
         if (!quoteValidation.valid) { await db.query('ROLLBACK'); const first = quoteValidation.issues[0]?.code ?? 'INVALID_QUOTE'; return json(response, 422, { code: first }); }
         if (BigInt(canonicalQuote.totalMinor) > BigInt(instruction.maxTotalMinor)) { await db.query('ROLLBACK'); return json(response, 422, { code: 'QUOTE_EXCEEDS_MAX_TOTAL' }); }
         const contentHash = computeQuoteHash(canonicalQuote);
-        const obligation = await db.query<{ id: string }>(`INSERT INTO procurement_obligations (owner_id, instruction_id, obligation_key, category, fulfillment_slot)
-          VALUES ($1, $2, $3, $4::instruction_category, $3) RETURNING id`, [member.id, instruction.id, `QUOTE:${key}`, instruction.category]);
+        const billAccountRef = instruction.category === 'BILL' && typeof actual['accountRef'] === 'string' ? actual['accountRef'].trim() : null;
+        const billInvoiceRef = instruction.category === 'BILL'
+          ? (typeof actual['invoiceOrCycleRef'] === 'string' ? actual['invoiceOrCycleRef'].trim()
+            : typeof actual['invoiceRef'] === 'string' ? actual['invoiceRef'].trim() : null) : null;
+        const billCycleRef = instruction.category === 'BILL' && typeof actual['billingCycle'] === 'string' ? actual['billingCycle'].trim() : null;
+        const obligation = await db.query<{ id: string }>(`INSERT INTO procurement_obligations
+          (owner_id, instruction_id, obligation_key, category, fulfillment_slot, external_account_ref, external_invoice_ref, external_cycle_ref)
+          VALUES ($1, $2, $3, $4::instruction_category, $3, $5, $6, $7) ON CONFLICT DO NOTHING RETURNING id`,
+          [member.id, instruction.id, `QUOTE:${key}`, instruction.category, billAccountRef, billInvoiceRef, billCycleRef]);
+        const obligationId = obligation.rows[0]?.id ?? (await db.query<{ id: string }>(
+          'SELECT id FROM procurement_obligations WHERE owner_id=$1 AND instruction_id=$2 AND obligation_key=$3 FOR UPDATE',
+          [member.id, instruction.id, `QUOTE:${key}`])).rows[0]?.id;
+        if (!obligationId) { await db.query('ROLLBACK'); return json(response, 409, { code: instruction.category === 'BILL' ? 'DUPLICATE_BILL_OBLIGATION' : 'OBLIGATION_IDENTITY_CONFLICT' }); }
         const operation = await db.query<{ id: string }>(`INSERT INTO purchase_operations (owner_id, instruction_id, obligation_id, state, permission_version, execution_key)
-          VALUES ($1, $2, $3, 'FIXTURE_QUOTED', $4, $5) RETURNING id`, [member.id, instruction.id, obligation.rows[0]!.id, instruction.permissionVersion, `quote:${instruction.id}:${key}`]);
+          VALUES ($1, $2, $3, 'FIXTURE_QUOTED', $4, $5) RETURNING id`, [member.id, instruction.id, obligationId, instruction.permissionVersion, `quote:${instruction.id}:${key}`]);
         const adapter = await db.query<{ id: string; adapterVersion: string }>(`SELECT id, adapter_version AS "adapterVersion" FROM vendor_adapters WHERE adapter_key = 'local-fixture' AND environment = 'FIXTURE' AND enabled = true AND execution_enabled = false AND status = 'VERIFIED' LIMIT 1`);
         if (!adapter.rows[0]) { await db.query('ROLLBACK'); return json(response, 503, { code: 'FIXTURE_ADAPTER_UNAVAILABLE' }); }
         const quote = await db.query<{ id: string }>(`INSERT INTO vendor_quotes

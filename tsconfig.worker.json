@@ -9,5 +9,5 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["apps/worker/src/**/*.ts"]
+  "include": ["apps/worker/src/**/*.ts", "packages/execution/src/**/*.ts", "packages/domain/src/**/*.ts"]
 }
