@@ -161,10 +161,11 @@ The recorded workflow and auth commands passed against their configured local Po
      - Ran `npm audit --json`: verified **0 vulnerabilities** (critical: 0, high: 0, moderate: 0, low: 0, info: 0), resolving all 53 legacy M1-A audit findings.
 - **Verification Evidence**:
   - `npm run test:acceptance`: **101 PASSED, 0 FAILED** (Suites C01–C19).
-  - `npm run test:ac03`: **ALL SCENARIOS PASSED** (Part 1 algorithmic + Part 2 PostgreSQL worker integration).
+  - `npm run test:m0`: **PASS** (`AC-02`, `AC-12`, `AC-17` capability, consent, session expiry, mandate revocation, and pre-purchase hold boundary).
+  - `npm run test:ac03`: **ALL SCENARIOS PASSED** (Part 1 algorithmic + Part 2 PostgreSQL worker integration, including active-instruction schedule edit fencing).
   - `npm run test:domain`: **6 PASSED**.
-  - `npm run test:paypal`: **2 PASSED**.
+  - `npm run test:paypal`: **3 PASSED** (including `AC-17` pre-purchase hold/deposit/bid block).
   - `npm run test:auth`: **M1-A auth PASSED**.
-  - `npm run test:m1:workflow`: **Fixture workflow PASSED**.
+  - `npm run test:m1:workflow`: **Fixture workflow PASSED** (including private supplier PATCH/DELETE cascade and `PRE_APPROVED` `fulfilled_count` completion limit tracking).
   - `npm run build`: **0 errors (415 kB bundle)**.
   - External financial execution remains strictly disabled.

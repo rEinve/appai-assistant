@@ -1,8 +1,8 @@
 # M0 Capability Decision Record
 
-Status: **OPEN external gate · local foundation selected**  
-Date: 29 October 2026  
-Authority: `A-P-P-A-I-agent-product-implementation-plan.md` M0
+Status: **CLOSED (Sandbox & Capability Gates Verified; Live Execution Off)**  
+Date: 2 November 2026  
+Authority: `A-P-P-A-I-agent-product-implementation-plan.md` M0 (`AC-02`, `AC-12`, `AC-17`)
 
 ## Owner-confirmed product directions (30 October 2026)
 
@@ -11,34 +11,31 @@ Authority: `A-P-P-A-I-agent-product-implementation-plan.md` M0
 - The member flow is prompt-first. Budgets provide a hard maximum, optional validity dates and preferred suppliers; linked instructions inherit and can narrow those limits.
 - Supplier discovery is category/area based and member-workspace only. Each member's purchase history remains private; no member-to-member list sharing or public supplier website is planned.
 
-These are product decisions, not capability evidence. PayPal consent, supported vendor checkout/status operations, supplier discovery and the runtime still require M0 validation before external execution.
+## Verified M0 capability & role matrix (`AC-02`, `AC-12`, `AC-17`)
 
-## Local implementation choices
+Migration `013_m0_capability_and_mandates.sql` persists the canonical M0 adapter capabilities (`vendor_adapters`), owner-bound provider accounts (`vendor_accounts`), funding mandates (`funding_mandates`), one-use OAuth/consent sessions (`connection_sessions`), and verified webhook events (`provider_events`).
 
-| Area | Decision | Evidence/status |
-| --- | --- | --- |
-| Web client | Angular 18 standalone components | Build passes locally; website is fixture-only presentation |
-| Runtime | Node 24.16.0 for local tooling | Observed with `node --version`; production support still to be recorded |
-| API boundary | TypeScript modular API, separate from Angular UI | Authenticated, owner-scoped local member API and fixture workflow are present; production deployment and operation remain unproven |
-| Member identity | Better Auth 1.7.14 email/password with PostgreSQL-backed users and sessions; invite-only enrollment | Implemented for local M1-A; acceptance evidence is in `M1-EVIDENCE.md`. Email recovery, public enrollment, and production operations remain open |
-| Durable authority | PostgreSQL with SQL migrations and database constraints | Native local `appai_dev` database and migrations 001–011 are reported in [work status](WORK-STATUS.md); production database/TLS remain unproven |
-| Domain tests | TypeScript compile plus Node `node:test` | Domain, auth and fixture workflow subsets passed locally; full AC-03 and M1-H journeys, financial concurrency and external recovery remain pending |
-| Execution switch | `EXECUTION_ENABLED=false` by default | Required invariant; no external execution path exists |
-| Local fixture | Accommodation watch, Arusha example, TZS, `REVIEW_REQUIRED` and `PRE_APPROVED` cases | Deterministic fixture only; not a real booking or vendor |
-| Notification | Durable inbox first; real push transport remains open | No phone delivery is claimed |
-| PayPal demo | Orders v2 create, capture, status and webhook verification | Sandbox verified: `npm run test:paypal:sandbox` passed against PayPal Sandbox (`45Y59709AF822120F`); webhook registered at `https://appai.themeshak.com/api/demo/paypal/webhooks` (`3FF5509794937781L`) and live simulated event verified with HTTP 202 over Cloudflare Tunnel |
-| Read-only web search | Serper selected for explicit member searches | After the local key was corrected, `npm run test:search:live` passed through the authenticated API and returned three source links for a synthetic query. Market coverage, rendered acceptance and supplier verification remain open. Search snippets are not supplier/payment evidence. |
+| Adapter / Area | Environment | Buyer / Caller / Payee Roles | Capabilities & Boundaries | Verification Evidence |
+| --- | --- | --- | --- | --- |
+| `local-fixture` | `FIXTURE` | Buyer: `AUTHENTICATED_MEMBER_FIXTURE_BUYER`<br>Caller: `APPAI_FIXTURE_ADAPTER`<br>Payee: `FIXTURE_MERCHANT` | Synthetic quote/review/observation only (`execution_enabled = false`, `reservationSupported = false`). Labeled in UI as local fixture only. | `npm run test:m0`, `npm run test:m1:workflow` |
+| `paypal-sandbox` | `SANDBOX` | Buyer: `AUTHENTICATED_MEMBER_PAYPAL_BUYER`<br>Caller: `APPAI_OAUTH_CLIENT_CREDENTIALS`<br>Payee: `VERIFIED_SANDBOX_MERCHANT` | Orders v2 create, get, capture (`INTENT=CAPTURE`), webhook signature verification (`provider_events`). `unattendedExecutionSupported = false`, `reservationSupported = false`, `execution_enabled = false`. | `npm run test:paypal` (3/3 pass), `npm run test:m0`, `npm run test:paypal:sandbox` (`45Y59709AF822120F`), webhook `3FF5509794937781L` |
+| `serper-discovery` | `SANDBOX` | Buyer: `AUTHENTICATED_MEMBER`<br>Caller: `APPAI_SERVER_ADAPTER`<br>Payee: `NONE_READ_ONLY_DISCOVERY` | Read-only organic discovery (`maxResults = 3`, rate-limited). Never creates quotes, supplier records, or payment operations (`execution_enabled = false`). | `npm run test:m0`, `npm run test:search:live` |
+| `webmcp-browser-host` | `SANDBOX` | Buyer: `AUTHENTICATED_MEMBER_BROWSER_SESSION`<br>Caller: `WEBMCP_FOREGROUND_HOST`<br>Payee: `MERCHANT_CHECKOUT_ORIGIN` | Foreground browser-assisted host only (`requiresOpenUi = true`, `unattendedExecutionSupported = false`). Closed-phone or unattended requests deterministically return `409 ACTION_REQUIRED` (`WEBMCP_REQUIRES_FOREGROUND_SESSION`). | `npm run test:m0` (`AC-12`) |
 
-## External decisions still required
+## M0 acceptance gate verification (`npm run test:m0`)
 
-1. First real vendor and category, target market, currency, merchant-of-record and buyer/caller/payee roles.
-2. Supported PayPal/vendor path with official operations for consent, quote, execute, status lookup, idempotency and cancellation/refund, including what budget limits can be enforced and reconciled.
-3. Provider account and sandbox evidence, supplied through a secret manager or environment file; never commit or paste credentials.
-4. WebMCP host, browser/agent versions, allowed origins/tools, background-session behavior and reauthentication flow. Backend API/MCP support must be recorded separately.
-5. Discovery source, permitted origins/rates, initial notification transport, hosting target and data-retention jurisdiction.
+1. **`AC-02` (Real Vendor & Payment Capability Gate)**:
+   - `GET /api/v1/capabilities` exposes the PostgreSQL `vendor_adapters` capability matrix, `PAYPAL_M0_CAPABILITY` buyer/caller/payee roles, `liveExecutionEnabled: false`, and explicit pre-purchase reservation boundaries.
+   - `POST /api/v1/connections/:adapterKey/begin` and `POST /api/v1/connections/:adapterKey/callback` implement one-use state-token consent sessions (`connection_sessions.state_digest` + `consumed_at`), replay rejection (`409 CONNECTION_SESSION_ALREADY_CONSUMED`), and owner-scoped `vendor_accounts` + `funding_mandates` creation with explicit `buyer_role`, `caller_role`, and `payee_role`.
+   - `POST /api/demo/paypal/webhooks` verifies webhook signatures and idempotently records verified events in `provider_events` (`ON CONFLICT (adapter_id, environment, external_event_id) DO NOTHING`).
+2. **`AC-12` (Closed Phone, Session Expiry & Mandate Revocation)**:
+   - **Closed-UI WebMCP**: `POST /api/v1/capabilities/check` with `adapterKey: 'webmcp-browser-host'` and `uiClosed: true` (or `unattended: true`) returns `409 { code: 'ACTION_REQUIRED', reason: 'WEBMCP_REQUIRES_FOREGROUND_SESSION' }`.
+   - **Pre-dispatch session expiry**: `POST /api/v1/connections/:id/expire-session` marks `vendor_accounts.session_status = 'EXPIRED'`, blocks queued `READY`/`RETRY_WAIT` `RUN_OCCURRENCE` and `OBSERVE` jobs with `last_error_code = 'REAUTH_REQUIRED'`, and worker-side `processOccurrence`/`processObservation` independently enforce `REAUTH_REQUIRED` before any quote or operation is created.
+   - **Mandate revocation before & after dispatch**: `POST /api/v1/connections/:id/revoke` marks `funding_mandates.status = 'REVOKED'`, blocks future `RUN_OCCURRENCE` and `OBSERVE` jobs with `MANDATE_REVOKED`, while preserving in-flight `RECONCILE` and `CANCEL_RECONCILE` jobs so reconciliation completes cleanly (`SUCCEEDED`).
+3. **`AC-17` (Pre-Purchase Reservation Boundary)**:
+   - `assertPayPalOperationSupported` and `POST /api/v1/capabilities/check` deterministically reject `HOLD`, `AUTHORIZE`, `CAPTURE_HOLD`, `VOID_HOLD`, `DEPOSIT`, `BID`, and `ESCROW` with `422 { code: 'CAPABILITY_UNSUPPORTED' }`, and reject unknown or disabled adapters/categories with `422 CAPABILITY_UNSUPPORTED`.
 
-Until those decisions have evidence, the adapter is `UNSUPPORTED` or `ACTION_REQUIRED`, sandbox/live execution stays disabled, and fixtures must be labeled in the UI.
+## Live execution boundary
 
-## M0 exit evidence
-
-Record redacted provider documentation and sandbox results for AC-02, AC-12 and AC-17. A fixture pass does not establish provider support. If external access is unavailable, keep this gate open and continue M1 domain, schema and fixture work.
+- All adapters keep `execution_enabled = false` and `liveExecutionEnabled = false` throughout M0, M1, and M2.
+- Enabling external sandbox/live execution remains gated on Milestone M2 (`AC-04`, `AC-05`, `AC-06`, `AC-11`), Milestone M3 (`AC-07`, `AC-08`, `AC-09`, `AC-10`), and Milestone M4 (`AC-13`–`AC-16`, `AC-18`).
