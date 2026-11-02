@@ -296,6 +296,22 @@ All five Pass 2 blockers are implemented and covered by the dedicated `npm run t
 
 **Observed verification, 2 November 2026:** `npm run test:m2` passed 8 domain tests and the PostgreSQL fixture workflow, including supplier deduplication, quote evidence/arithmetic/currency/ceiling checks, approval read-only and concurrent decisions, amendment invalidation, quote expiry sweep, watch matching/no-match continuation, and soft-threshold routing. `test:m0`, `test:ac03`, `test:auth`, and the 101-assertion acceptance matrix also passed. External execution remains disabled. This closes the five listed code blockers; it does not establish provider-sourced authoritative quotes or production checkout capability.
 
+### 4.4 Final Checkpoint Verification Record
+
+**Checkpoint:** Commit `e7e276f` on `main` (`Complete M2 discovery and quote review remediation`); worktree clean after commit.
+
+**Observed locally on 2 November 2026:**
+
+| Command | Result | Evidence boundary |
+| :--- | :--- | :--- |
+| `npm run test:m2` | Passed: 8 domain tests plus PostgreSQL M1/M2 fixture workflows, including the M2 cases listed in § 4.3. | Local PostgreSQL; fixture-only workflows; no vendor or payment API called. |
+| `npm run test:m0` | Passed: `AC-02`, `AC-12`, and `AC-17`; `liveExecutionEnabled: false`. | Local PostgreSQL capability and mandate gates; no live execution. |
+| `npm run test:acceptance` | Passed: 101 assertions, 0 failures. | Automated domain/UI lifecycle acceptance suite. |
+| `npm run build` | Passed: Vite production build completed. | Local production bundle build. |
+| `git diff --check` | Passed before commit. | Whitespace/error check for the committed changes. |
+
+These results verify the committed fixture implementation and local acceptance contracts. They do not establish provider-sourced quote normalization, validated live vendor/category coverage, or production checkout capability.
+
 ---
 
 ## 5. Verification & Exit Checklist

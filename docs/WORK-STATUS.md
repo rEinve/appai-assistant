@@ -47,6 +47,8 @@ The member area supports invite-only sign-in, prompt-first instruction drafts, a
 
 The five Pass 2 remediation items in the [M2 implementation plan](M2%20Discover%20Quote%20and%20Review%20Plan.md) are implemented and covered by `npm run test:m2`. The work adds deduplicated owner-scoped discovery, an idempotent fixture quote intake route with category/evidence/arithmetic/currency/ceiling checks, read-only and one-time approval lifecycle checks, watch match/no-match handling with intervals and soft thresholds, and a dedicated PostgreSQL acceptance runner. Migrations 014–015 keep quote lifecycle separate from immutable quote evidence. External provider execution remains disabled.
 
+**Final checkpoint, 2 November 2026:** Commit `e7e276f` on `main`. `npm run test:m2` passed (8 domain tests and PostgreSQL fixture workflows); `npm run test:m0` passed with `liveExecutionEnabled: false`; `npm run test:acceptance` passed 101/101; `npm run build` and `git diff --check` passed. The test environment was local; M2 workflow evidence is fixture-only. Provider-sourced authoritative quote normalization, validated live vendor/category coverage, and production checkout remain open. Detailed command results are recorded in § 4.4 of the [M2 plan](M2%20Discover%20Quote%20and%20Review%20Plan.md).
+
 M2's fixture contracts are verified. Provider-sourced authoritative quote normalization, validated live vendor/category coverage, and production checkout capability remain open gates; fixture records do not prove those capabilities.
 
 ## Next acceptance and implementation sequence (M2 / M3)

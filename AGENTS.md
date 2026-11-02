@@ -28,6 +28,13 @@
 - Future coverage must include domain rules, PostgreSQL concurrency, adapter contracts, user journeys, and recovery. No numeric coverage threshold or test naming convention is selected.
 - Record environment, fixture versus real adapter, observed result, and evidence. Fixture success does not establish sandbox or live capability.
 
+## Completion Reporting Procedure
+- After implementation and verification, record the outcome in the relevant milestone or implementation report and update `docs/WORK-STATUS.md` when project status changes.
+- Include the milestone and affected requirement/acceptance IDs, a concise summary of delivered changes, the checkpoint commit when available, and remaining gaps.
+- For each verification result, record the date, command, environment or adapter mode (fixture, provider sandbox, or live), and observed pass/fail result. Link to a durable report or artifact when available.
+- Keep implementation, fixture verification, provider sandbox verification, and live enablement as separate claims. Do not infer provider or production capability from fixture results.
+- Preserve earlier evidence as historical; add new observed results with their own date instead of silently rewriting what an earlier run proved.
+
 ## Commit & Pull Request Guidelines
 - This directory has no Git metadata, so no historical commit convention can be inferred. Use concise, imperative subjects.
 - PRs should describe the change, affected requirement/acceptance IDs, validation evidence, and unresolved decisions; include screenshots for UI changes.
