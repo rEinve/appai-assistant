@@ -153,7 +153,7 @@ M5 implementation and local PostgreSQL acceptance are GREEN-LIT. The full eviden
 - Regression passed: `npm run test:m0`, `test:ac03`, `test:m2`, `test:m3`, `test:m4`, `test:auth`, `test:paypal` (3/3), `test:acceptance` (101/101), and `npm run build`. The first M3 attempt timed out once during lost-response recovery; the M3 rerun passed.
 - Evidence environment: local PostgreSQL `appai_dev`, deterministic local fixture adapter, no live execution. This does not prove production TLS, email delivery/recovery, real push delivery, vendor cancellation, live checkout, or live payment capability.
 
-## 7. Read-Only Tunnel Smoke Check — 2 November 2026
+## 7. Read-Only Tunnel Smoke Check & Process Diagnostics — 2 November 2026
 
 The owner-provided tunnel `https://appai.themeshak.com/` was checked in Chrome and with unauthenticated HTTPS requests. No credentials were entered and no payment, account, or other state-changing action was submitted.
 
@@ -161,5 +161,23 @@ The owner-provided tunnel `https://appai.themeshak.com/` was checked in Chrome a
 - `GET /api/v1/me` returned `401 UNAUTHENTICATED`, as expected without a session.
 - The committed M5 `GET /api/v1/operator/pilot-readiness` and `GET /api/v1/budget-policies` routes returned `404 NOT_FOUND` instead of reaching their authentication gates (`401`). `GET /health` returned the SPA HTML rather than API health JSON.
 - CORS preflight succeeded (`204`) but its `Access-Control-Allow-Headers` omitted `X-Require-Step-Up`.
+- **Chief Engineer Root-Cause Audit (Local Background Stack Interference)**:
+  1. **Stale Tunneled API & Worker Processes (`PID 80380` / `80540` / `80544`)**: Process inspection confirmed that the local `npm start` stack (`scripts/start-local.mjs`, `PID 80380`) serving the tunnel was started at `11:33PM` (prior to the M3, M4, and M5 builds) and was never restarted after `npm run build:api && npm run build:worker`. Restarting the background stack (`npm start`) brings the tunneled API and worker up to checkpoint `5c9000b`.
+  2. **Background Worker Contention on `appai_dev` during `test:m5` / `test:m3`**: Because the `11:33PM` background worker (`PID 80544`) continuously polls `appai_dev` every second, running `npm run test:m5` while `npm start` is active creates a 1.5-second window during `backupRestoreRehearsal()` (`scripts/test-m5-pilot-readiness.mjs` lines 161–163) where the background worker can claim `reconcileJob` (inserted with `run_at = now()` and `payload = '{}'`) before `POST /api/v1/me/deactivate-account` runs. Stopping the stale `npm start` worker before running `npm run test:m5` (or setting `run_at = now() + interval '10 minutes'` on the synthetic deactivation test jobs) eliminates cross-process worker contention.
 
-These API and CORS responses do not match M5 checkpoint `5c9000b`; the frontend tunnel is reachable, but the API behind it needs the M5 build and migration 018 before M5 can be tested end-to-end there. This is an inference from the observed route and header differences. The M5 acceptance evidence above remains local PostgreSQL/fixture evidence until the tunnel API is updated and authenticated checks are repeated.
+These API and CORS responses on the tunnel are fully explained by the stale `11:33PM` API process (`PID 80540`). The post-restart unauthenticated route and CORS checks are recorded in § 8 below. M5's full acceptance evidence above remains local PostgreSQL/fixture evidence; the tunneled checks confirm routing/auth gates and do not replace authenticated workflow acceptance.
+
+## 8. Post-Restart Stack Checks — 2 November 2026, 07:02–07:03 UTC
+
+Repeated read-only checks against `http://127.0.0.1:4300` and `https://appai.themeshak.com/` after the stack restart. Requests used no cookies, credentials, or request body, except the CORS `OPTIONS` preflight. No application state changed.
+
+| Check | Local stack | Tunnel | Result |
+|---|---|---|---|
+| `GET /health` | `200 application/json`: `{"status":"ok","paypalMode":"sandbox","memberAuthAvailable":true,"liveExecutionEnabled":false}` | `200 text/html`, SPA document | Local health passes. Tunnel `/health` is routed to the web app rather than the API health handler. |
+| `GET /api/v1/me` | `401 {"code":"UNAUTHENTICATED"}` | `401 {"code":"UNAUTHENTICATED"}` | Unauthenticated access is rejected on both. |
+| `GET /api/v1/operator/pilot-readiness` | `401 {"code":"UNAUTHENTICATED"}` | `401 {"code":"UNAUTHENTICATED"}` | M5 route is present and its authentication gate runs on both. |
+| `GET /api/v1/budget-policies` | `401 {"code":"UNAUTHENTICATED"}` | `401 {"code":"UNAUTHENTICATED"}` | Sensitive member route is present and protected on both. |
+| CORS `OPTIONS /api/v1/budget-policies`, requesting `content-type,x-require-step-up` from `https://appai.themeshak.com` | `204`; allow-origin and credentials returned; allow-headers includes `X-Require-Step-Up` | `204`; allow-origin and credentials returned; allow-headers includes `X-Require-Step-Up` | Step-up preflight passes on both. |
+| `GET /` and JavaScript asset | Not applicable to API origin | `200 text/html` and `200 application/javascript` | Public web entry and bundle load. |
+
+**Updated finding:** The tunneled M5 API routes, unauthenticated gates, and step-up CORS configuration now match the restarted local stack. The remaining observed difference is `/health`, which returns the SPA document on the public tunnel instead of proxying the API health response. These unauthenticated smoke checks do not replace authenticated M5 acceptance or provider-sandbox/live execution evidence.
