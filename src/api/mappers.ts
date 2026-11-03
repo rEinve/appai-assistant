@@ -78,6 +78,8 @@ export function mapApiInstructionToDomain(apiInst: ApiInstruction): Instruction 
     priceCeiling,
     currency: apiInst.currency || "USD",
     criteria,
+    nextRunAt: apiInst.nextRunAt,
+    timezoneSnapshot: apiInst.timezoneSnapshot,
     nextRun: apiInst.nextRunAt
       ? new Date(apiInst.nextRunAt).toLocaleDateString("en-US", {
           month: "short",

@@ -102,6 +102,7 @@ export function getInitialInstructions(): Instruction[] {
       currency: "USD",
       criteria: "Northline Roasters · 2 bags whole bean · Under $45/mo",
       nextRun: "June 12",
+      calendarDate: "2026-06-12",
       lastCheck: "8 minutes ago",
       currentOperation: "Awaiting delivery address confirmation",
       stopRule: "Cease if monthly price exceeds $45",
@@ -192,6 +193,7 @@ export function getInitialInstructions(): Instruction[] {
       criteria:
         "HostNet Cloud · $24/mo renewal · Renews June 10 · Warning: Service cutoff on non-payment",
       nextRun: "June 10",
+      calendarDate: "2026-06-10",
       lastCheck: "12 minutes ago",
       currentOperation:
         "Renewal invoice awaiting authorization · Risk of service termination",

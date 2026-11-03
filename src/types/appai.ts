@@ -29,6 +29,9 @@ export interface Instruction {
   currency: string
   criteria: string
   nextRun: string
+  nextRunAt?: string | null
+  timezoneSnapshot?: string | null
+  calendarDate?: string | null
   lastCheck: string
   currentOperation: string
   stopRule: string
