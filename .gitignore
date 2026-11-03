@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out-tsc/
+marketing/
 .angular/
 .env
 .env.*
@@ -8,4 +9,3 @@ out-tsc/
 .DS_Store
 *.log
 *.dump
-
