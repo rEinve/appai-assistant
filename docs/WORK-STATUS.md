@@ -77,6 +77,39 @@ The member area supports invite-only sign-in, prompt-first instruction drafts, a
   - **`AC-16`**: Allowlisted operator endpoints (`/api/v1/operator/recovery`, `/api/v1/operator/adapters/:key/circuit-breaker`, `/api/v1/operator/execution-switch`) block new dispatch (`ADAPTER_CIRCUIT_OPEN` / `EXECUTION_PAUSED`, including approved quotes and `PRE_APPROVED` worker occurrences) while in-flight `RECONCILE` and `CANCEL_RECONCILE` jobs finish; row snapshot/restore and worker restart preserve reservations and `stable_request_key` replay protection.
 - **Chief Engineer Verification & Sign-Off, 2 November 2026:** Commit `b6c2844` (`Implement M4 mobile controls and operational recovery`) on `main`. Independently verified by Chief Engineer: `npm run test:m4` (domain 11/11, API/worker builds, local PostgreSQL acceptance), alongside full regression (`test:m0`, `test:ac03`, `test:m2`, `test:m3`, `test:auth`, `test:paypal` 3/3, `test:acceptance` 101/101, and `npm run build`). Local fixture results do not establish real push transport, provider cancellation, sandbox checkout, or live execution. See the [M4 implementation and acceptance report](M4%20Mobile%20Control%20Cancellation%20and%20Operational%20Recovery%20Plan.md).
 
+## Deployment Preparation & 5-Step Pre-Flight Verification — Completed 2 November 2026
+
+The production deployment preparation sequence and mandatory 5-step pre-flight verification gate (`.agents/skills/five-final-checklist/SKILL.md`) are executed and verified:
+- **Step 1 (Strict Token & Style Hygiene)**: Design tokens defined at root in `src/index.css` (`--color-canvas`, `--color-surface`, `--color-primary`, `--color-finance`, `--color-positive`, `--color-warning`), verified zero invalid class mutations.
+- **Step 2 (Semantic & A11y Compliance)**: 100% static accessibility compliance verified on compiled distribution HTML. Unique `<title>` and `<meta name="description">`, descriptive link and button labelling, high contrast focus indicators, and strict heading hierarchy confirmed.
+- **Step 3 (Motion & Reduced-Motion)**: Smooth tokenized transitions with strict `@media (prefers-reduced-motion: reduce)` override in `src/index.css` and `ConversationScreen.tsx`.
+- **Step 4 (Privacy, SEO & LLM Discovery)**: Added `public/robots.txt`, `public/sitemap.xml`, and `public/llms.txt` (per llmstxt.org standard). Updated `index.html` with canonical URL (`https://appai.themeshak.com/`), Open Graph tags, Twitter card metadata, and Schema.org JSON-LD structured data (`Organization`, `WebApplication`). Added `.xml` MIME type to `scripts/serve-staging.mjs`.
+- **Step 5 (Build & Regression Gate)**:
+  - Clean production builds: `npm run build` (emits `dist/appai-website` with static assets copied), `npm run build:domain`, `npm run build:api`, `npm run build:worker` (0 errors).
+  - All 18 PostgreSQL migrations verified (`npm run db:migrate`).
+  - Full test verification: `npm run test:domain` (11/11 pass), `npm run test:acceptance` (101/101 pass), `npm run test:paypal` (3/3 pass), `npm run test:auth` (pass), `npm run test:m5` (pass; SLA benchmarks, retention, step-up, and full `pg_dump`/`pg_restore` backup rehearsal pass).
+  - Test hardening: synthetic deactivation test jobs in `scripts/test-m5-pilot-readiness.mjs` scheduled at `now() + interval '10 minutes'` to eliminate cross-process worker contention during backup/restore rehearsal.
+  - Pre-deployment database checkpoint created: `appai-checkpoint-2026-11-02T08-07-02-664Z.dump` (356 KB).
+  - Safety gate: `liveExecutionEnabled: false` remains strictly enforced.
+
+### Public Splash Optimization Follow-Up — 2 November 2026
+
+- Aligned the document title, Open Graph/Twitter titles, and Schema.org names to the displayed **APPAI** brand; clarified the page description and first-paragraph product definition.
+- Prerendered the public landing page into the production HTML, then hydrated it with React, so its main copy and headings are present before client JavaScript runs. Existing authentication and workspace behavior stays in the React app.
+- Removed duplicate Google Font stylesheet requests, used the shared public logo URL for cacheable references, added visible keyboard focus styling for links, and provided an accessible name for the product preview.
+- Updated `public/llms.txt` to describe the member-facing product and invite-only access; limited `public/sitemap.xml` to the public homepage.
+- Verification: `npm run build` passed on 2 November 2026; generated `dist/appai-website/index.html` contains the prerendered landing content. Automated and assistive-technology accessibility checks, real-user performance metrics, and post-change live HTTP/social-card checks remain to be run as part of deployment verification.
+
+## Production Deployment (`appia.intelliweblab.com`) — Completed 2 November 2026
+
+The full A-P-P-A-I stack is deployed and verified live on server `ubuntu@57.131.131.51` under `https://appia.intelliweblab.com/`:
+- **PostgreSQL 16**: Dedicated `appai` database and role created on `127.0.0.1:5432`; migrations 001–018 applied.
+- **Frontend SPA**: Vite React 19 application bundle, static assets, `robots.txt`, `sitemap.xml`, and `llms.txt` deployed to `/var/www/appia.intelliweblab.com/dist/appai-website`.
+- **Backend API & Durable Worker**: Systemd units `appai-api.service` (listening on port 4300) and `appai-worker.service` active and auto-restarting.
+- **Nginx Reverse Proxy & Cloudflare SSL**: Virtual host at `/etc/nginx/sites-available/appia.intelliweblab.com` using Cloudflare origin certificate (`/etc/ssl/cloudflare/intelliweblab.pem`), HTTP/2, security headers, and upstream proxy for `/api/` and `/health`.
+- **Live Verification**: `GET /` (HTTP/2 200), `GET /health` (`status: ok, memberAuthAvailable: true, liveExecutionEnabled: false`), `GET /robots.txt`, `GET /sitemap.xml`, `GET /llms.txt` (HTTP/2 200), and `GET /api/v1/operator/pilot-readiness` (HTTP/2 401 unauthenticated protection) verified live over Cloudflare HTTPS.
+- **Enrollment**: Initial operator invitation code generated for `admin@intelliweblab.com`.
+
 ## M5 Implementation Status
 
 **M5 is GREEN-LIT in local PostgreSQL and deterministic fixture mode.** Live execution remains disabled; production TLS, email delivery/recovery, and live provider capability evidence remain open.

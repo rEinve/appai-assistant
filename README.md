@@ -1,54 +1,155 @@
-# A-P-P-A-I
+# AppAI (appasssistant) — Autonomous Personal Procurement Assistant
 
-The repository contains the Angular website, invite-only member authentication, a PostgreSQL persistence foundation, domain contracts, and a fixture-only PayPal demo API. Product and safety contracts are in [`docs/README.md`](docs/README.md).
+> **Delegate your purchases. Retain complete control.**  
+> AppAI is the world’s first autonomous personal procurement assistant designed to eliminate the mental tax of everyday purchasing chores—safely, reliably, and within user-defined budget guardrails.
 
-## Member sign-in checkpoint
+---
 
-The local M1 member workflow supports invite-only sign-in, account and budget setup, owner-scoped instructions, fixture-only activation, pause/resume/revoke, synthetic quotes, review decisions, and activity history. Fixture runs never call vendors or payment providers and grant no real spending authority. M0 provider capability, sandbox/live execution, public recovery delivery, sensitive-action step-up, and production deployment remain open. See [work status](docs/WORK-STATUS.md) and [M1 evidence](docs/M1-EVIDENCE.md).
+## 1. Executive Summary & Vision
 
-## Local setup
+Between recurring household consumables, routine utility bills, and hardware upgrades, modern consumers waste over **14 hours each month** managing shopping carts and tracking orders. Meanwhile, legacy "Subscribe & Save" services lock buyers into single retailers while silently hiking prices.
 
-Requirements: Node.js 22.9+ and a running local PostgreSQL server. Install dependencies once:
+**AppAI** replaces this manual chore loop with **guarded agentic commerce**. You instruct AppAI in natural English (*"Keep our office stocked with specialty whole-bean coffee under $35 every 3 weeks"*), and the system handles candidate discovery, authoritative quoting, scheduling, and checkout under **zero-trust financial guardrails**.
 
+---
+
+## 2. Core Features & Functionality
+
+### 💬 1. Conversational AI Concierge (Prompt-First Intake)
+* **Natural Dialogue:** Speak or type requests naturally without wrestling with rigid forms.
+* **Instant Constraint Extraction:** The concierge automatically extracts delivery cadence, quality criteria, vendor requirements, and hard price caps.
+* **Proposal & Agreement Versioning:** Synthesizes formal agreement proposals (`v1`, `v2`, etc.). Material changes increment the agreement version, cleanly invalidating unused approvals while preserving in-flight operations ([PRD](docs/A-P-P-A-I-agent-product-requirements-document.md)).
+
+### 🛡️ 2. Dual Permission Modes & Safety Governance
+AppAI enforces immutable safety boundaries defined in [`src/types/appai.ts`](src/types/appai.ts):
+* **`REVIEW_BEFORE_PURCHASE`**: The agent identifies candidates, verifies authoritative merchant quotes, and prepares checkout—requiring an explicit **1-tap mobile authorization** before any money moves.
+* **`PRE_APPROVED`**: Completely hands-free autonomous ordering up to an authorized budget ceiling. If a price rises by even **$0.01** above the ceiling, AppAI halts immediately and transitions to review mode.
+* **`NOTIFY_ONLY`**: Continuous watch triggers that scout deals and alert members without placing orders.
+
+### 📅 3. Dynamic Timetable Planner
+* **Pure Read-Only Projection:** Automatically projects upcoming orders, recurring deliveries, and active deal watches from active instructions and confirmed quotes.
+* **Zero Spreadsheet Maintenance:** Derives chronological schedules dynamically—no manual calendar tracking required ([`src/store/domainCore.ts`](src/store/domainCore.ts)).
+* **Direct Navigation:** Tapping any scheduled task navigates directly to its originating conversation thread with full historical context.
+
+### 🎯 4. 24/7 Deal & Price-Drop Watches
+* **Continuous Scanning:** Set autonomous scouts for hardware, flights, or supplies with target price thresholds and merchant rating filters.
+* **Rapid Notification & Sniping:** The moment a price drop lands, AppAI secures the quote and delivers an instant 1-tap checkout card before inventory sells out.
+
+### 🤝 5. Private Supplier Relationships & Hierarchy
+* **Custom Relationships:** Register preferred private suppliers, contractors, or local vendors.
+* **Discovery Hierarchy:** Prioritizes sourcing in strict order: `Budget Preferred` → `Private History` → `Curated Catalogue` → `Read-Only Discovery`.
+
+---
+
+## 3. System Architecture & Under-the-Hood Rigor
+
+```mermaid
+flowchart TD
+    User["Member (Prompt / 1-Tap Mobile Approval)"] <--> ReactUI["React 19 + Tailwind v4 Web App<br>(dist/appai-website)"]
+    ReactUI <--> API["Authenticated API Gateway<br>(Better Auth / PostgreSQL Sessions)"]
+    API <--> PG[("PostgreSQL Transaction Authority<br>(Migrations 001–018)")]
+    PG <--> Worker["Durable Background Worker<br>(AC-03 Schedule & Downtime Recovery)"]
+    Worker <--> Discovery["Discovery & WebMCP Adapters<br>(Read-Only Search / Quoting)"]
+    Worker <--> PayPalRail["Payment Rail Gateway<br>(PayPal Orders v2 / Sandbox)"]
+```
+
+### Architectural Principles
+
+1. **PostgreSQL as the Transaction Authority:**
+   * Employs atomic budget reservations (`ACTIVE` → `COMMITTED` → `RELEASED`) to prevent double-spending or race conditions ([Schema Spec](docs/A-P-P-A-I-agent-schema.md)).
+   * Enforces idempotent request deduplication (`stable_request_key`) across all execution attempts.
+
+2. **Durable Worker & Timezone Engine (`AC-03` Matrix):**
+   * Resilient background engine surviving server restarts, network dropouts, and multi-month downtime.
+   * **Missed-Tick Recovery:** After extended downtime, executes exactly one overdue cycle rather than spamming duplicate catch-up charges.
+   * Fully Daylight Saving Time (DST) compliant across EDT/EST transitions.
+
+3. **Separation of Reasoning from Payment Rails:**
+   * LLMs reason strictly over product specifications, merchant metadata, and schedules.
+   * Payment authorization is strictly isolated within tokenized partner gateways (e.g., PayPal Orders v2). **Raw credit card numbers are never exposed to LLM prompts.**
+
+---
+
+## 4. Technology Stack
+
+* **Frontend:** React 19, TypeScript (strict mode), Vite, Tailwind CSS v4, supporting desktop and compact 5-tab mobile viewports.
+* **Backend & Persistence:** Node.js/TypeScript, PostgreSQL (Migrations 001–018), Better Auth session governance.
+* **Integrations:** PayPal Orders v2 sandbox adapter, WebMCP browser host runner, Serper read-only discovery.
+* **Verification:** Comprehensive 101-assertion automated acceptance suite in [`tests/acceptance-matrix.ts`](tests/acceptance-matrix.ts).
+
+---
+
+## 5. Local Setup & Quickstart
+
+### Prerequisites
+* **Node.js** 22.9+
+* **PostgreSQL** running locally (e.g., `postgresql://127.0.0.1:5432/appai_dev` or via Docker Compose)
+
+### 1. Install Dependencies
 ```bash
 npm install
 ```
 
-Run the API, local PostgreSQL database, migrations, and Angular site together:
-
+### 2. Environment Configuration
+On first launch, the runner creates a private `.env` file if one does not exist. Ensure your database connection is specified:
 ```bash
-npm start                  # member area + its API at http://localhost:4200
+DATABASE_URL=postgresql://appai:appai-local-only@127.0.0.1:5432/appai_dev
+```
+*(Optional)* Add AI and payment keys for live sandbox testing:
+```bash
+GOOGLE_KEY=your_gemini_api_key                # Enables AI Concierge extraction
+PAYPAL_DEMO_MODE=sandbox                      # Enables PayPal sandbox testing
+PAYPAL_CLIENT_ID=your_paypal_client_id
+PAYPAL_CLIENT_SECRET=your_paypal_client_secret
 ```
 
-On first run, the launcher creates a private `.env` with a random local authentication secret if one does not exist. Set `DATABASE_URL` there to the database and credentials for your installed PostgreSQL server. The launcher checks that connection, applies migrations, builds the API, and waits for member authentication before starting Angular. It does not start Docker by default. The root page opens the member area and checks for an existing session; use **Back to website** to reach the public page. Keep `.env` private; it is ignored by Git.
+### 3. Run Development Environment
+Starts the API, applies PostgreSQL migrations, and launches the React 19 member site:
+```bash
+npm start
+```
+* **Member Website:** `http://localhost:4201`
+* **API Server:** `http://localhost:4200`
 
-The Compose database remains an optional isolated alternative: set `APP_USE_DOCKER_DB=true` and use `DATABASE_URL=postgresql://appai:appai-local-only@127.0.0.1:5432/appai_dev`. Its default password is for local development only. `npm run db:up` starts it manually; `npm run db:down` stops it while preserving its volume.
-
-Create a member invite for an email you control:
-
+### 4. Create an Invite Code
+AppAI enforces invite-only member enrollment. Generate a one-time invitation code:
 ```bash
 npm run invite:member -- --email=you@example.com
 ```
+Use the output code on the web sign-up screen.
 
-The command prints a one-use invitation code to the terminal; share it privately and enter it on the member area's sign-up form. Local PayPal mode defaults to `fixture` and never moves money. `npm start` owns the local API lifecycle; use `npm run demo:api` only when you want to run the API separately.
+---
 
-To try the optional **Ask assistant** draft-refinement step, set `GOOGLE_KEY` in the private root `.env` and restart `npm start`. `GOOGLE_MODELS` accepts up to three comma-separated models in priority order, for example `gemini-3.8-flash,gemini-3.5-flash-lite`; the next model is tried only if the previous model is unavailable or rate limited. Manual instruction setup works without a key. The assistant sends the member's instruction to Gemini only when they select **Ask assistant**. Review the provider's data controls before using real personal information. This step cannot activate instructions or make purchases.
+## 6. Verification & Test Commands
 
-For optional read-only web search in Instructions, set `searchProvider=serper` and `serperApiKey` in the private `.env`, then restart the API. The member enters and submits search terms explicitly. Results are unverified links, never quotes or proof that a supplier can accept payment. `npm run test:search:live` checks the authenticated route with a synthetic query and temporary member; it passed with the corrected local key.
-
-For PayPal sandbox checkout testing, use a PayPal Developer **Business** sandbox account for the REST app credentials and a separate **Personal** sandbox account as the demo customer. Set `PAYPAL_DEMO_MODE=sandbox`, `PAYPAL_CLIENT_ID`, and `PAYPAL_CLIENT_SECRET` in the private `.env`. Run `npm run test:paypal:sandbox` to create a USD 1.00 synthetic order and print its buyer approval link. Sign in to that link with the Personal sandbox account. After approval, explicitly capture the sandbox order with `npm run test:paypal:sandbox -- --capture=ORDER_ID`; this uses sandbox funds only. To inspect an existing order and recover its approval link, run `npm run test:paypal:sandbox -- --order=ORDER_ID`. The normal fixture mode never contacts PayPal. Do not use live credentials for these commands.
-
-## Development commands
+Every core capability is covered by automated verification:
 
 ```bash
-npm run build              # production website bundle
-npm run build:api          # compile API
-npm run test:auth          # PostgreSQL-backed M1-A acceptance checks
-npm run test:domain        # domain contract tests
-npm run test:paypal        # PayPal adapter tests with a local fetch stub
-npm run test:assistant:live # synthetic Gemini extraction and draft persistence; uses the private key
-npm run test:search:live    # synthetic authenticated Serper search; uses the private key
-npm run test:paypal:sandbox # real PayPal Developer sandbox create/status smoke test
+npm run build              # Compile production website bundle (dist/appai-website)
+npm run test:domain        # Domain contract tests (11/11 passing)
+npm run test:acceptance    # Comprehensive 101-point lifecycle & UI acceptance suite
+npm run test:m0            # Capability matrix, role bindings & mandate revocation
+npm run test:ac03          # Schedule matrix, DST transitions & downtime recovery
+npm run test:auth          # PostgreSQL session & invite security tests
+npm run test:paypal        # PayPal Orders v2 contract tests with local fetch stub
 ```
 
-`npm run test:auth` requires the configured local PostgreSQL database and applies the migrations before running. It creates and cleans up uniquely named test members. Migrations are in `packages/persistence/migrations/`; use `npm run db:migrate` to apply them to the configured development database. `npm run db:down` stops the local database container while retaining its named volume. Do not use production credentials for local acceptance tests.
+---
+
+## 7. Documentation & Marketing Navigation
+
+### Core Specifications
+* **[Product Requirements Document (PRD)](docs/A-P-P-A-I-agent-product-requirements-document.md)**: Product scope, permission rules, and requirement IDs.
+* **[Technical Requirements Document](docs/A-P-P-A-I-agent-technical-requirements-document.md)**: Architecture, execution contracts, and state boundaries.
+* **[Schema Specification](docs/A-P-P-A-I-agent-schema.md)**: Database tables, constraints, and migrations.
+* **[Development Acceptance Matrix](docs/DEVELOPMENT-ACCEPTANCE.md)**: Requirement-linked verification scenarios.
+* **[Work Status Log](docs/WORK-STATUS.md)**: Active implementation proof and milestone status.
+
+### Marketing & Launch Distribution Kit
+* **[Marketing Kit Overview](marketing/README.md)**: Central marketing index and distribution guide.
+* **[3-Minute Demo Video Script](marketing/DEMO_VIDEO_SCRIPT_3MIN.md)**: Fast-paced 180-second product demo script for website embeds and social ads.
+* **[1-Month Master Editorial Calendar (CSV)](marketing/EDITORIAL_CALENDAR_MONTH_1.csv)**: 44-row Excel/Sheets calendar (12 blog posts, 28 daily FB/IG posts, 4 YouTube videos).
+* **[Master Editorial Handbook](marketing/EDITORIAL_CALENDAR_GUIDE.md)**: Outlines for all 12 articles and 4 YouTube video blueprints.
+* **[SEO Keyword & Workload Strategy](marketing/SEO_KEYWORD_STRATEGY.md)**: 4 target keyword clusters and monthly production hours.
+* **[Brand Positioning & Messaging Guide](marketing/POSITIONING_AND_MESSAGING.md)**: Personas, elevator pitches, and FAQs.
+* **[Multi-Channel Social Media Kit](marketing/SOCIAL_MEDIA_KIT.md)**: X/Twitter launch thread, LinkedIn post, and Product Hunt / HN templates.

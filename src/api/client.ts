@@ -181,6 +181,18 @@ class ApiClient {
     })
   }
 
+  async signUp(input: {
+    name: string
+    email: string
+    password: string
+    inviteCode: string
+  }): Promise<MemberSession> {
+    return this.request<MemberSession>("/api/auth/sign-up/email", {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+  }
+
   async signOut(): Promise<void> {
     await this.request<void>("/api/auth/sign-out", {
       method: "POST",

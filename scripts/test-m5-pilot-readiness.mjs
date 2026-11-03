@@ -158,8 +158,8 @@ try {
   console.log(`M5 SLAs passed: reservation p95=${reservationP95.toFixed(2)}ms, API p95=${apiP95.toFixed(2)}ms, due-job pickup=${pickupLagMs}ms; 10 concurrent operations, 5 winners, total=${BigInt(held)+BigInt(spent)} minor units.`);
 
   const auditCount=(await pool.query('SELECT count(*)::int AS n FROM audit_events WHERE owner_id=$1',[ownerId])).rows[0].n;
-  const reconcileJob=(await pool.query(`INSERT INTO jobs(owner_id,instruction_id,obligation_id,job_type,dedupe_key,state,run_at) VALUES($1,$2,$3,'RECONCILE',$4,'READY',now()) RETURNING id`,[ownerId,instruction,obligation,`m5-reconcile-${suffix}`])).rows[0].id;
-  const futureJob=(await pool.query(`INSERT INTO jobs(owner_id,instruction_id,job_type,dedupe_key,state,run_at) VALUES($1,$2,'RUN_OCCURRENCE',$3,'READY',now()) RETURNING id`,[ownerId,instruction,`m5-future-${suffix}`])).rows[0].id;
+  const reconcileJob=(await pool.query(`INSERT INTO jobs(owner_id,instruction_id,obligation_id,job_type,dedupe_key,state,run_at) VALUES($1,$2,$3,'RECONCILE',$4,'READY',now()+interval '10 minutes') RETURNING id`,[ownerId,instruction,obligation,`m5-reconcile-${suffix}`])).rows[0].id;
+  const futureJob=(await pool.query(`INSERT INTO jobs(owner_id,instruction_id,job_type,dedupe_key,state,run_at) VALUES($1,$2,'RUN_OCCURRENCE',$3,'READY',now()+interval '10 minutes') RETURNING id`,[ownerId,instruction,`m5-future-${suffix}`])).rows[0].id;
   await backupRestoreRehearsal();
   const deactivated=await request('/api/v1/me/deactivate-account',{method:'POST'}); assert.equal(deactivated.response.status,200,`deactivation: ${JSON.stringify(deactivated.json)}`);
   assert.equal((await pool.query('SELECT active FROM users WHERE id=$1',[ownerId])).rows[0].active,false);

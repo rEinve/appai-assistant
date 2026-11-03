@@ -28,7 +28,7 @@ import type { InboxItem } from "./types/appai"
 
 function ProductPreview() {
   return (
-    <div className="product-preview" aria-label="A-P-P-A-I product preview">
+    <div className="product-preview">
       <div className="preview-rail">
         <BrandMark compact />
         {(["home", "assignment", "calendar_month", "inbox"] as IconName[]).map(
@@ -82,11 +82,13 @@ function ProductPreview() {
 }
 
 function Landing({
+  isAuthenticated,
   onEnter,
   onSignIn,
 }: {
+  isAuthenticated: boolean
   onEnter: () => void
-  onSignIn: () => void
+  onSignIn: (mode?: "signin" | "signup") => void
 }) {
   return (
     <main className="landing">
@@ -104,10 +106,16 @@ function Landing({
           <a href="#security">Security</a>
         </nav>
         <div className="landing-nav__actions">
-          <Button variant="text" onClick={onSignIn}>
-            Sign in
-          </Button>
-          <Button onClick={onEnter}>Open workspace</Button>
+          {isAuthenticated ? (
+            <Button onClick={onEnter}>Open workspace</Button>
+          ) : (
+            <>
+              <Button variant="text" onClick={() => onSignIn("signin")}>
+                Sign in
+              </Button>
+              <Button onClick={() => onSignIn("signup")}>Redeem invite</Button>
+            </>
+          )}
         </div>
       </header>
 
@@ -122,13 +130,25 @@ function Landing({
             <em>Let it get done.</em>
           </h1>
           <p>
-            A personal procurement assistant that researches, plans, and follows
-            through—within the budget and permissions you choose.
+            APPAI is a personal procurement assistant that researches products,
+            compares supplier terms, and tracks purchases within the budget and
+            permissions you set.
           </p>
           <div className="landing-hero__actions">
-            <Button icon="arrow_forward" onClick={onEnter}>
-              Explore the workspace
-            </Button>
+            {isAuthenticated ? (
+              <Button icon="arrow_forward" onClick={onEnter}>
+                Open workspace
+              </Button>
+            ) : (
+              <>
+                <Button icon="arrow_forward" onClick={() => onSignIn("signin")}>
+                  Sign in
+                </Button>
+                <Button variant="secondary" onClick={() => onSignIn("signup")}>
+                  Redeem invite
+                </Button>
+              </>
+            )}
             <a className="text-link" href="#how-it-works">
               See how it works <Icon name="arrow_forward" />
             </a>
@@ -142,7 +162,11 @@ function Landing({
             </span>
           </div>
         </div>
-        <div className="landing-hero__visual">
+        <div
+          className="landing-hero__visual"
+          role="img"
+          aria-label="APPAI workspace preview showing product research, supplier comparisons, and budget status"
+        >
           <div className="orbit orbit--one" />
           <div className="orbit orbit--two" />
           <ProductPreview />
@@ -334,10 +358,15 @@ function Landing({
         <BrandMark />
         <h2>Ready to make procurement feel lighter?</h2>
         <p>
-          Explore the supported workspace with clearly labeled fixture data.
+          {isAuthenticated
+            ? "Your personal procurement workspace is ready."
+            : "APPAI is currently invitation-only. Sign in or enter your invitation code to access your workspace."}
         </p>
-        <Button icon="arrow_forward" onClick={onEnter}>
-          Open workspace
+        <Button
+          icon="arrow_forward"
+          onClick={() => (isAuthenticated ? onEnter() : onSignIn("signin"))}
+        >
+          {isAuthenticated ? "Open workspace" : "Sign in to workspace"}
         </Button>
       </section>
 
@@ -347,35 +376,74 @@ function Landing({
           <span className="brand__name">appai</span>
         </div>
         <p>Personal procurement, with permission.</p>
-        <span>Fixture experience · 2026</span>
+        <span>Invitation-only access</span>
       </footer>
     </main>
   )
 }
 
 function Login({
+  initialMode = "signin",
   onBack,
   onComplete,
 }: {
+  initialMode?: "signin" | "signup"
   onBack: () => void
   onComplete: () => void
 }) {
+  const [mode, setMode] = useState<"signin" | "signup">(initialMode)
+  const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [inviteCode, setInviteCode] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Pre-fill from URL query parameters if present (e.g. ?invite=...&email=...)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const urlInvite = params.get("invite")
+      const urlEmail = params.get("email")
+      if (urlInvite) {
+        setInviteCode(urlInvite)
+        setMode("signup")
+      }
+      if (urlEmail) {
+        setEmail(urlEmail)
+      }
+    } catch {}
+  }, [])
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setError(null)
     setLoading(true)
     try {
-      await api.signIn(email, password)
+      if (mode === "signin") {
+        await api.signIn(email, password)
+      } else {
+        if (!inviteCode.trim()) {
+          throw new Error("An invitation code is required to join APPAI.")
+        }
+        await api.signUp({
+          name: name.trim() || email.split("@")[0] || "Member",
+          email: email.trim().toLowerCase(),
+          password,
+          inviteCode: inviteCode.trim(),
+        })
+      }
       onComplete()
     } catch (err: any) {
-      setError(err?.data?.message || err?.message || "Sign in failed. Check your email and password.")
+      setError(
+        err?.data?.message ||
+          err?.message ||
+          (mode === "signin"
+            ? "Sign in failed. Check your email and password."
+            : "Registration failed. Please verify your invitation code and details.")
+      )
     } finally {
       setLoading(false)
     }
@@ -405,18 +473,69 @@ function Login({
 
         <div className="login-card">
           <div className="login-card__intro">
-            <span className="eyebrow">Secure workspace</span>
-            <h1>Welcome back</h1>
-            <p>Sign in to continue to your APPAI workspace.</p>
+            <span className="eyebrow">Invitation-Only Workspace</span>
+            <h1>{mode === "signin" ? "Welcome back" : "Redeem invitation"}</h1>
+            <p>
+              {mode === "signin"
+                ? "Sign in to continue to your verified APPAI workspace."
+                : "Enter your details and invitation code to create your account."}
+            </p>
+          </div>
+
+          <div className="auth-mode-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "signin"}
+              className={`auth-mode-tab ${mode === "signin" ? "auth-mode-tab--active" : ""}`}
+              onClick={() => {
+                setMode("signin")
+                setError(null)
+              }}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "signup"}
+              className={`auth-mode-tab ${mode === "signup" ? "auth-mode-tab--active" : ""}`}
+              onClick={() => {
+                setMode("signup")
+                setError(null)
+              }}
+            >
+              Redeem invite
+            </button>
           </div>
 
           {error && (
-            <div className="p-3 mb-4 text-xs rounded-xl bg-red-50 text-red-700 border border-red-200" role="alert">
+            <div
+              className="p-3 my-4 text-xs rounded-xl bg-red-50 text-red-700 border border-red-200"
+              role="alert"
+            >
               {error}
             </div>
           )}
 
           <form className="login-form" onSubmit={handleSubmit}>
+            {mode === "signup" && (
+              <label className="field">
+                <span>Full name</span>
+                <span className="field__control">
+                  <input
+                    type="text"
+                    name="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Meshack M"
+                    autoComplete="name"
+                    required
+                  />
+                </span>
+              </label>
+            )}
+
             <label className="field">
               <span>Email address</span>
               <span className="field__control">
@@ -441,7 +560,7 @@ function Login({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
-                  autoComplete="current-password"
+                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
                   required
                 />
                 <button
@@ -455,40 +574,49 @@ function Login({
               </span>
             </label>
 
-            <div className="login-form__options">
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={remember}
-                  onChange={(event) => setRemember(event.target.checked)}
-                />
-                <span>Keep me signed in</span>
+            {mode === "signup" && (
+              <label className="field">
+                <span>Invitation code</span>
+                <span className="field__control">
+                  <input
+                    type="text"
+                    name="inviteCode"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    placeholder="Paste your 32-character invite code"
+                    autoComplete="off"
+                    required
+                  />
+                </span>
               </label>
-              <button className="login-link" type="button">
-                Forgot password?
-              </button>
-            </div>
+            )}
+
+            {mode === "signin" && (
+              <div className="login-form__options">
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(event) => setRemember(event.target.checked)}
+                  />
+                  <span>Keep me signed in</span>
+                </label>
+                <button className="login-link" type="button">
+                  Forgot password?
+                </button>
+              </div>
+            )}
 
             <button className="login-submit" type="submit" disabled={loading}>
-              {loading ? "Signing in…" : "Sign in"}
+              {loading
+                ? mode === "signin"
+                  ? "Signing in…"
+                  : "Activating account…"
+                : mode === "signin"
+                ? "Sign in"
+                : "Create account & enter"}
             </button>
           </form>
-
-          <div className="login-divider">
-            <span>or</span>
-          </div>
-          <button
-            className="login-secondary"
-            type="button"
-            onClick={onComplete}
-          >
-            Explore fixture workspace
-          </button>
-
-          <p className="login-demo-note">
-            <Icon name="lock" /> Preview mode does not store or send
-            credentials.
-          </p>
         </div>
       </section>
 
@@ -506,11 +634,47 @@ function Login({
 export default function App() {
   const store = useAppaiStore()
   const [active, setActive] = useState<string>("Landing")
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin")
+  const [session, setSession] = useState<MemberSession | null>(null)
+  const [sessionChecked, setSessionChecked] = useState(false)
 
-  // Hydrate data from backend on mount if session is active
+  // Verify auth session on mount and handle invite link
   useEffect(() => {
-    store.hydrateFromApi()
+    let mounted = true
+    const checkAuth = async () => {
+      try {
+        const params = new URLSearchParams(window.location.search)
+        const urlInvite = params.get("invite")
+        if (urlInvite) {
+          setAuthMode("signup")
+          setActive("Login")
+        }
+        const userSession = await api.getSession()
+        if (!mounted) return
+        if (userSession?.user) {
+          setSession(userSession)
+          await store.hydrateFromApi()
+        } else {
+          setSession(null)
+        }
+      } catch {
+        if (mounted) setSession(null)
+      } finally {
+        if (mounted) setSessionChecked(true)
+      }
+    }
+    checkAuth()
+    return () => {
+      mounted = false
+    }
   }, [store.hydrateFromApi])
+
+  // Strict route clearance guard: unauthenticated users cannot enter any workspace view
+  useEffect(() => {
+    if (sessionChecked && !session && active !== "Landing" && active !== "Login") {
+      setActive("Login")
+    }
+  }, [session, sessionChecked, active])
 
   const [offerReviewOpen, setOfferReviewOpen] = useState(false)
   const [decisionRecordOpen, setDecisionRecordOpen] = useState(false)
@@ -640,8 +804,19 @@ export default function App() {
   if (active === "Landing") {
     return (
       <Landing
-        onEnter={() => setActive("Home")}
-        onSignIn={() => setActive("Login")}
+        isAuthenticated={!!session}
+        onEnter={() => {
+          if (session) {
+            setActive("Home")
+          } else {
+            setAuthMode("signin")
+            setActive("Login")
+          }
+        }}
+        onSignIn={(mode = "signin") => {
+          setAuthMode(mode)
+          setActive("Login")
+        }}
       />
     )
   }
@@ -649,8 +824,11 @@ export default function App() {
   if (active === "Login") {
     return (
       <Login
+        initialMode={authMode}
         onBack={() => setActive("Landing")}
         onComplete={async () => {
+          const userSession = await api.getSession()
+          setSession(userSession)
           await store.hydrateFromApi()
           setActive("Home")
         }}
@@ -750,6 +928,7 @@ export default function App() {
             try {
               await api.signOut()
             } catch {}
+            setSession(null)
             store.loadScenario("HAPPY_PATH")
             setActive("Landing")
           }}

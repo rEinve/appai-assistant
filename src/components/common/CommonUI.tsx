@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, type ReactNode } from "react"
-import appaiLogo from "../../assets/appai-logo.svg"
 import type { DiagnosticLog } from "../../store/appaiStore"
 
 export type IconName = "home" | "assignment" | "calendar_month" | "inbox" | "settings" | "search" | "more_horiz" | "arrow_forward" | "pause" | "add" | "check_circle" | "schedule" | "notifications" | "shield" | "storefront" | "tune" | "bolt" | "chat" | "lock" | "shopping_bag" | "payments" | "public" | "edit" | "logout" | "mail" | "visibility" | "visibility_off" | "arrow_back" | "verified_user" | "attach_file" | "send" | "close" | "info" | "warning" | "receipt_long" | "local_shipping" | "replay" | "terminal" | "expand_more" | "expand_less"
@@ -16,7 +15,7 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
     <img
       className={compact ? "brand-logo brand-logo--compact" : "brand-logo"}
-      src={appaiLogo}
+      src="/appai-logo.svg"
       alt=""
     />
   )

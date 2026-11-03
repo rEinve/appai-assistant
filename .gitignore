@@ -7,3 +7,5 @@ out-tsc/
 !.env.example
 .DS_Store
 *.log
+*.dump
+
