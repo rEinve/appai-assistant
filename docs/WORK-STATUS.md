@@ -118,6 +118,7 @@ The updated APPAI web client was compiled from checkpoint commit `6a09928` (`Add
 - **Public Splash & SEO Prerendering**: Production HTML contains prerendered landing structure, APPAI branding metadata, hydration entry point, and updated crawler discovery endpoints (`/llms.txt`, `/robots.txt`, `/sitemap.xml`).
 - **Planner Calendar Views**: Deployed interactive Month and Week projection views, schedule matrix, and day-budget navigation.
 - **Static A11y Gate**: 100% WCAG 2.1 AA static scan verified (single H1, unique titles, no empty links).
+- **Dedicated UI Prototype Sandbox (`/prototype/`)**: Standalone interactive prototype deployed at `https://appia.intelliweblab.com/prototype/` with a 4-stage lifecycle switcher (Intake & Discovery → De-Boxed Agreement → Active Execution → Planner Projection) and direct return navigation to the main application. The homepage remains strictly invite-only.
 - **Multi-Endpoint Live Verification (3 November 2026)**:
   - `GET /` — HTTP/2 200 (prerendered HTML served, `no-store, no-cache` document caching).
   - `GET /health` — HTTP/2 200 (`{"status":"ok","paypalMode":"fixture","memberAuthAvailable":true,"liveExecutionEnabled":false}`).
