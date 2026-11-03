@@ -142,6 +142,14 @@ The Apas web client, UI prototype sandbox, and discovery metadata were compiled 
     - `npm run build:api` and `npm run build:worker` compiled with 0 errors.
     - Full test suite verified: `npm run test:domain` (11/11 pass), `npm run test:paypal` (3/3 pass), `npm run test:acceptance` (101/101 pass).
     - Safety gate: `liveExecutionEnabled: false` remains strictly enforced.
+- **Live Multi-Endpoint Verification (4 November 2026)**:
+  - Remote bundle safety backup archived to `/home/ubuntu/backups/appai-website-backup-20261103_214024.tar.gz`.
+  - Nginx reloaded cleanly; `appai-api.service` and `appai-worker.service` active and operational.
+  - `GET https://appia.intelliweblab.com/` — HTTP/2 200 (prerendered HTML served, `<title>Apas | Personal Procurement Assistant</title>`).
+  - `GET https://appia.intelliweblab.com/prototype/` — HTTP/2 200 (`<title>Apas UI Prototype Sandbox</title>`).
+  - `GET https://appia.intelliweblab.com/sitemap.xml` — HTTP/2 200 (`<lastmod>2026-11-04</lastmod>`).
+  - `GET https://appia.intelliweblab.com/llms.txt` — HTTP/2 200 (Apas product context).
+  - Internal health check `GET http://127.0.0.1:4300/health` — HTTP 200 (`{"status":"ok","paypalMode":"fixture","memberAuthAvailable":true,"liveExecutionEnabled":false}`).
 
 ## M5 Implementation Status
 
