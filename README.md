@@ -3,6 +3,10 @@
 > **Delegate your purchases. Retain complete control.**  
 > AppAI is the world’s first autonomous personal procurement assistant designed to eliminate the mental tax of everyday purchasing chores—safely, reliably, and within user-defined budget guardrails.
 
+![AppAI member dashboard showing active instructions, budget status, today's plan, and inbox updates](screenshot.png)
+
+*Dashboard preview in fixture workspace mode; the displayed instructions and amounts are sample data.*
+
 ---
 
 ## 1. Executive Summary & Vision
