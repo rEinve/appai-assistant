@@ -2,7 +2,7 @@
 
 This guide covers the supported single-host setup: the AppAI web client, authenticated API, background worker, and PostgreSQL database. The repository's Compose file starts **PostgreSQL only**; the Node.js application services run as separate processes. This guide keeps payment mode in `fixture`, which simulates local behavior and does not charge a payment account.
 
-AppAI's first-party software and documentation are available under the [MIT License](../LICENSE). The HubSpot-named templates under `marketing/` may have separate terms and are not relicensed by the MIT file. AppAI is free to use; hosting, domains, database services, and optional AI or search providers may have their own costs.
+AppAI's software and first-party documentation are available under the [MIT License](../LICENSE). AppAI is free to use; hosting, domains, database services, and optional AI or search providers may have their own costs.
 
 ## Requirements
 

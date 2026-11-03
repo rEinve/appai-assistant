@@ -163,13 +163,4 @@ npm run test:paypal        # PayPal Orders v2 contract tests with local fetch st
 * **[Self-hosting & deployment guide](docs/SELF-HOSTING.md)**: Clone, install, configure, run locally, deploy on one Ubuntu VPS, update, back up, and troubleshoot.
 * **[License](LICENSE)**: MIT License.
 
-The MIT license applies to the AppAI project software and first-party documentation. The HubSpot-named template documents in `marketing/` may have separate source terms and are not relicensed by this project license; check their original terms before reuse or redistribution. AppAI itself is free to use, while hosting, domains, database services, and optional third-party API usage may have costs.
-
-### Marketing & Launch Distribution Kit
-* **[Marketing Kit Overview](marketing/README.md)**: Central marketing index and distribution guide.
-* **[3-Minute Demo Video Script](marketing/DEMO_VIDEO_SCRIPT_3MIN.md)**: Fast-paced 180-second product demo script for website embeds and social ads.
-* **[1-Month Master Editorial Calendar (CSV)](marketing/EDITORIAL_CALENDAR_MONTH_1.csv)**: 44-row Excel/Sheets calendar (12 blog posts, 28 daily FB/IG posts, 4 YouTube videos).
-* **[Master Editorial Handbook](marketing/EDITORIAL_CALENDAR_GUIDE.md)**: Outlines for all 12 articles and 4 YouTube video blueprints.
-* **[SEO Keyword & Workload Strategy](marketing/SEO_KEYWORD_STRATEGY.md)**: 4 target keyword clusters and monthly production hours.
-* **[Brand Positioning & Messaging Guide](marketing/POSITIONING_AND_MESSAGING.md)**: Personas, elevator pitches, and FAQs.
-* **[Multi-Channel Social Media Kit](marketing/SOCIAL_MEDIA_KIT.md)**: X/Twitter launch thread, LinkedIn post, and Product Hunt / HN templates.
+The MIT license applies to the AppAI project software and first-party documentation. AppAI is free to use; hosting, domains, database services, and optional third-party API usage may have costs.
