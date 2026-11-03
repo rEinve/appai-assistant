@@ -65,7 +65,7 @@ export function UnsupportedModal({
       title: "Monthly Budget Limit Policy Block",
       eyebrow: "Policy Rule Enforced",
       description:
-        'This transaction exceeds your configured $1,200.00 monthly allocation limit. In accordance with strict financial governance, APPAI prohibits inline "hard cap exception" overrides.',
+        'This transaction exceeds your configured $1,200.00 monthly allocation limit. In accordance with strict financial governance, Apas prohibits inline "hard cap exception" overrides.',
       recommendation:
         "To proceed, you must update your monthly allocation via authenticated versioned settings so policy compliance can be re-evaluated.",
       actionText: "Adjust limit in Settings",
@@ -78,7 +78,7 @@ export function UnsupportedModal({
       description:
         "The specified merchant does not support automated ordering or secure sandbox checkout via standard APIs.",
       recommendation:
-        "APPAI can continue researching alternative merchants with verified API fulfillment, or track price drops via notifications.",
+        "Apas can continue researching alternative merchants with verified API fulfillment, or track price drops via notifications.",
       actionText: "Explore alternative vendors",
     },
     STALE_OFFER: {
@@ -87,7 +87,7 @@ export function UnsupportedModal({
       title: "Vendor Offer Expired",
       eyebrow: "Time Limit Elapsed",
       description:
-        "The 3-hour price hold provided by the vendor has elapsed. APPAI cannot guarantee previous pricing or inventory holds.",
+        "The 3-hour price hold provided by the vendor has elapsed. Apas cannot guarantee previous pricing or inventory holds.",
       recommendation:
         "Ask the assistant to re-check current pricing and request a fresh offer from the vendor.",
       actionText: "Check fresh prices",

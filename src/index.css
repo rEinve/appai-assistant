@@ -9,7 +9,7 @@
   --color-ink: #0b1426;
   --color-ink-muted: #5b677b;
   --color-primary: #003aa8;
-  --color-primary-deep: #061b48;
+  --color-primary-deep: #002A7A;
   --color-primary-deep-surface: #0d3274;
   --color-primary-container: #e3ecff;
   --color-on-primary: #ffffff;
@@ -1224,7 +1224,7 @@
 }
 
 .promise-strip {
-  background: var(--color-finance);
+  background: var(--color-primary-deep);
 }
 
 .process-card {
@@ -1252,9 +1252,8 @@
   position: relative;
   overflow: hidden;
   border-radius: 24px;
-  background:
-    radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--color-primary) 68%, transparent), transparent 34%),
-    var(--color-finance);
+  background: var(--color-surface);
+  color: var(--color-ink);
 }
 
 .security-grid article {
@@ -2319,7 +2318,7 @@
   background:
     linear-gradient(color-mix(in srgb, #ffffff 5%, transparent) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, #ffffff 5%, transparent) 1px, transparent 1px),
-    var(--color-finance);
+    var(--color-primary-deep);
   background-size: 40px 40px;
   color: var(--color-on-primary);
   padding: 64px;
@@ -3335,7 +3334,7 @@
 
 /* Late overrides keep the brand treatment above responsive source order. */
 .promise-strip {
-  background: var(--color-finance);
+  background: var(--color-primary-deep);
 }
 
 .process-card {
@@ -3363,9 +3362,9 @@
   position: relative;
   overflow: hidden;
   border-radius: 24px;
-  background:
-    radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--color-primary) 68%, transparent), transparent 34%),
-    var(--color-finance);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  margin-block: 112px;
 }
 
 .security-grid article {
@@ -3379,8 +3378,8 @@
   box-shadow: 0 10px 24px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
 
-/* Deep blue feature bands keep the existing brand color and give the page a
-   stronger visual anchor without adding motion or decorative noise. */
+/* Light surfaces keep the landing page open while the ring outlines retain a
+   quiet brand cue. */
 .control-section {
   position: relative;
   isolation: isolate;
@@ -3391,8 +3390,8 @@
   margin: 0;
   overflow: hidden;
   border: 0;
-  background: var(--color-primary-deep);
-  color: var(--color-on-primary);
+  background: var(--color-surface);
+  color: var(--color-ink);
   padding: 112px max(24px, calc((100vw - 1180px) / 2));
 }
 
@@ -3427,18 +3426,18 @@
 
 .control-copy > p {
   max-width: 470px;
-  color: color-mix(in srgb, var(--color-on-primary) 78%, transparent);
+  color: var(--color-ink-muted);
   text-wrap: pretty;
 }
 
 .control-section .authority-panel {
-  border: 1px solid color-mix(in srgb, var(--color-on-primary) 22%, transparent);
-  background: color-mix(in srgb, var(--color-primary-deep-surface) 82%, var(--color-primary-deep));
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--color-primary-deep) 36%, transparent);
+  border: 1px solid var(--color-outline);
+  background: var(--color-surface);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--color-ink) 8%, transparent);
 }
 
 .control-section .authority-panel > .eyebrow {
-  color: color-mix(in srgb, var(--color-on-primary) 78%, transparent);
+  color: var(--color-ink-muted);
 }
 
 .control-section .authority-option:first-of-type {
@@ -3455,9 +3454,9 @@
   isolation: isolate;
   width: 100%;
   overflow: hidden;
-  border-top: 1px solid color-mix(in srgb, var(--color-primary-container) 18%, transparent);
-  background: var(--color-primary-deep);
-  color: var(--color-on-primary);
+  border-top: 1px solid var(--color-outline);
+  background: var(--color-surface);
+  color: var(--color-ink);
   padding: 104px 24px;
 }
 
@@ -3489,17 +3488,34 @@
 }
 
 .landing-cta p {
-  color: color-mix(in srgb, var(--color-on-primary) 78%, transparent);
+  color: var(--color-ink-muted);
   text-wrap: pretty;
 }
 
 .landing-cta .button--filled {
-  background: var(--color-primary-container);
-  color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
 }
 
 .landing-cta .button--filled:hover {
-  background: var(--color-on-primary);
+  background: var(--color-primary-deep);
+}
+
+.security-section .eyebrow {
+  color: var(--color-ink-muted);
+}
+
+.security-grid article {
+  border: 1px solid var(--color-outline);
+  background: var(--color-surface);
+}
+
+.security-grid article > .material-symbols-rounded {
+  color: var(--color-primary);
+}
+
+.security-grid p {
+  color: var(--color-ink-muted);
 }
 
 @media (max-width: 780px) {
@@ -3507,6 +3523,10 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 48px;
     padding-block: 84px;
+  }
+
+  .security-section {
+    margin-block: 84px;
   }
 
   .control-section::before {

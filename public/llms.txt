@@ -1,19 +1,19 @@
-# APPAI — Personal Procurement Assistant
+# Apas — Personal Procurement Assistant
 
-> APPAI is an invitation-only personal procurement assistant. It helps members research products, compare supplier terms, and track purchases within the budgets and permissions they set.
+> Apas is an invitation-only personal procurement assistant. It helps members research products, compare supplier terms, and track purchases within the budgets and permissions they set.
 
 ## Overview
-APPAI helps members turn a procurement need into product research, supplier comparisons, purchase reviews, and progress updates. Members choose the budget limits and level of authority for each instruction.
+Apas helps members turn a procurement need into product research, supplier comparisons, purchase reviews, and progress updates. Members choose the budget limits and level of authority for each instruction.
 
-## How APPAI works
+## How Apas works
 - Members describe what they need in plain language.
-- APPAI researches products and compares supplier price, delivery, and return terms.
+- Apas researches products and compares supplier price, delivery, and return terms.
 - Members review recommendations and choose whether to approve an action.
 - Budget limits and permissions constrain each instruction.
 - Members can follow progress and review decision records.
 
 ## Access
-APPAI is currently invitation-only. Public registration is not available.
+Apas is currently invitation-only. Public registration is not available.
 
 ## Public Endpoints
 - Homepage: https://appia.intelliweblab.com/

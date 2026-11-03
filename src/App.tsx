@@ -95,7 +95,7 @@ function Landing({
       <header className="landing-nav">
         <div className="brand">
           <BrandMark />
-          <span className="brand__name">appai</span>
+          <span className="brand__name">Apas</span>
         </div>
         <nav
           className="landing-nav__links"
@@ -130,7 +130,7 @@ function Landing({
             <em>Let it get done.</em>
           </h1>
           <p>
-            APPAI is a personal procurement assistant that researches products,
+            Apas is a personal procurement assistant that researches products,
             compares supplier terms, and tracks purchases within the budget and
             permissions you set.
           </p>
@@ -165,7 +165,7 @@ function Landing({
         <div
           className="landing-hero__visual"
           role="img"
-          aria-label="APPAI workspace preview showing product research, supplier comparisons, and budget status"
+          aria-label="Apas workspace preview showing product research, supplier comparisons, and budget status"
         >
           <div className="orbit orbit--one" />
           <div className="orbit orbit--two" />
@@ -352,7 +352,7 @@ function Landing({
       <footer className="landing-footer">
         <div className="brand">
           <BrandMark />
-          <span className="brand__name">appai</span>
+          <span className="brand__name">Apas</span>
         </div>
         <p>Personal procurement, with permission.</p>
         <span>Invitation-only access</span>
@@ -405,7 +405,7 @@ function Login({
         await api.signIn(email, password)
       } else {
         if (!inviteCode.trim()) {
-          throw new Error("An invitation code is required to join APPAI.")
+          throw new Error("An invitation code is required to join Apas.")
         }
         await api.signUp({
           name: name.trim() || email.split("@")[0] || "Member",
@@ -434,11 +434,11 @@ function Login({
         <button
           className="brand"
           type="button"
-          aria-label="Back to APPAI home"
+          aria-label="Back to Apas home"
           onClick={onBack}
         >
           <BrandMark />
-          <span className="brand__name">appai</span>
+          <span className="brand__name">Apas</span>
         </button>
         <button className="login-help" type="button">
           Help
@@ -456,7 +456,7 @@ function Login({
             <h1>{mode === "signin" ? "Welcome back" : "Redeem invitation"}</h1>
             <p>
               {mode === "signin"
-                ? "Sign in to continue to your verified APPAI workspace."
+                ? "Sign in to continue to your verified Apas workspace."
                 : "Enter your details and invitation code to create your account."}
             </p>
           </div>
@@ -600,7 +600,7 @@ function Login({
       </section>
 
       <footer className="login-footer">
-        <span>© 2026 APPAI</span>
+        <span>© 2026 Apas</span>
         <nav aria-label="Legal links">
           <a href="#privacy">Privacy</a>
           <a href="#terms">Terms</a>

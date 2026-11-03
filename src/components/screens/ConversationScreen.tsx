@@ -1198,7 +1198,7 @@ export function ConversationScreen({
               <p>
                 {existingInst
                   ? "Adjust boundaries or parameters. Saved agreements require explicit confirmation."
-                  : "State what you need. APPAI will clarify criteria and propose a binding agreement."}
+                  : "State what you need. Apas will clarify criteria and propose a binding agreement."}
               </p>
             </div>
           </div>
@@ -1560,7 +1560,7 @@ export function ConversationScreen({
             <span className="eyebrow">Governance & Controls</span>
             <h3>Authority Mode</h3>
             <p>
-              APPAI enforces your boundary strictly. Choose how autonomously you
+              Apas enforces your boundary strictly. Choose how autonomously you
               want this instruction to operate.
             </p>
 

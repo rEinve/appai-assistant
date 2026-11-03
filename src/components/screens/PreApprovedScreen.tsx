@@ -187,7 +187,7 @@ export function PreApprovedScreen({
               </span>
             </div>
             <p className="text-xs text-indigo-900 mt-1">
-              This task was pre-approved by you. APPAI verified that the payable
+              This task was pre-approved by you. Apas verified that the payable
               total (${operation.payableTotal.toFixed(2)}) is within your limit
               and did not ask for redundant financial re-approval.
             </p>

@@ -24,7 +24,7 @@ try {
   }
 
   await writeFile(outputPath, html.replace(rootMarker, `<div id="root">${markup}</div>`))
-  console.log("Prerendered the APPAI landing page into dist/appai-website/index.html")
+  console.log("Prerendered the Apas landing page into dist/appai-website/index.html")
 } finally {
   await vite.close()
 }

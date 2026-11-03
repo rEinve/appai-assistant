@@ -1,11 +1,7 @@
-# AppAI (appasssistant) — Autonomous Personal Procurement Assistant
+# Apas (appasssistant) — Autonomous Personal Procurement Assistant
 
 > **Delegate your purchases. Retain complete control.**  
-> AppAI is the world’s first autonomous personal procurement assistant designed to eliminate the mental tax of everyday purchasing chores—safely, reliably, and within user-defined budget guardrails.
-
-![AppAI member dashboard showing active instructions, budget status, today's plan, and inbox updates](screenshot.png)
-
-*Dashboard preview in fixture workspace mode; the displayed instructions and amounts are sample data.*
+> Apas (pronounced "Appas") is the world’s first autonomous personal procurement assistant designed to eliminate the mental tax of everyday purchasing chores—safely, reliably, and within user-defined budget guardrails.
 
 ---
 
@@ -13,7 +9,7 @@
 
 Between recurring household consumables, routine utility bills, and hardware upgrades, modern consumers waste over **14 hours each month** managing shopping carts and tracking orders. Meanwhile, legacy "Subscribe & Save" services lock buyers into single retailers while silently hiking prices.
 
-**AppAI** replaces this manual chore loop with **guarded agentic commerce**. You instruct AppAI in natural English (*"Keep our office stocked with specialty whole-bean coffee under $35 every 3 weeks"*), and the system handles candidate discovery, authoritative quoting, scheduling, and checkout under **zero-trust financial guardrails**.
+**Apas** replaces this manual chore loop with **guarded agentic commerce**. You instruct Apas in natural English (*"Keep our office stocked with specialty whole-bean coffee under $35 every 3 weeks"*), and the system handles candidate discovery, authoritative quoting, scheduling, and checkout under **zero-trust financial guardrails**.
 
 ---
 
@@ -25,9 +21,9 @@ Between recurring household consumables, routine utility bills, and hardware upg
 * **Proposal & Agreement Versioning:** Synthesizes formal agreement proposals (`v1`, `v2`, etc.). Material changes increment the agreement version, cleanly invalidating unused approvals while preserving in-flight operations ([PRD](docs/A-P-P-A-I-agent-product-requirements-document.md)).
 
 ### 🛡️ 2. Dual Permission Modes & Safety Governance
-AppAI enforces immutable safety boundaries defined in [`src/types/appai.ts`](src/types/appai.ts):
+Apas enforces immutable safety boundaries defined in [`src/types/appai.ts`](src/types/appai.ts):
 * **`REVIEW_BEFORE_PURCHASE`**: The agent identifies candidates, verifies authoritative merchant quotes, and prepares checkout—requiring an explicit **1-tap mobile authorization** before any money moves.
-* **`PRE_APPROVED`**: Completely hands-free autonomous ordering up to an authorized budget ceiling. If a price rises by even **$0.01** above the ceiling, AppAI halts immediately and transitions to review mode.
+* **`PRE_APPROVED`**: Completely hands-free autonomous ordering up to an authorized budget ceiling. If a price rises by even **$0.01** above the ceiling, Apas halts immediately and transitions to review mode.
 * **`NOTIFY_ONLY`**: Continuous watch triggers that scout deals and alert members without placing orders.
 
 ### 📅 3. Dynamic Timetable Planner
@@ -37,7 +33,7 @@ AppAI enforces immutable safety boundaries defined in [`src/types/appai.ts`](src
 
 ### 🎯 4. 24/7 Deal & Price-Drop Watches
 * **Continuous Scanning:** Set autonomous scouts for hardware, flights, or supplies with target price thresholds and merchant rating filters.
-* **Rapid Notification & Sniping:** The moment a price drop lands, AppAI secures the quote and delivers an instant 1-tap checkout card before inventory sells out.
+* **Rapid Notification & Sniping:** The moment a price drop lands, Apas secures the quote and delivers an instant 1-tap checkout card before inventory sells out.
 
 ### 🤝 5. Private Supplier Relationships & Hierarchy
 * **Custom Relationships:** Register preferred private suppliers, contractors, or local vendors.
@@ -86,57 +82,41 @@ flowchart TD
 ## 5. Local Setup & Quickstart
 
 ### Prerequisites
-* **Node.js** 22.12 or newer (Node 24 LTS is also supported by Vite 8).
-* **npm**, installed with Node.js.
-* **PostgreSQL 16** locally, or Docker Compose to start the included PostgreSQL-only service.
+* **Node.js** 22.9+
+* **PostgreSQL** running locally (e.g., `postgresql://127.0.0.1:5432/appai_dev` or via Docker Compose)
 
-### 1. Clone and install
+### 1. Install Dependencies
 ```bash
-git clone https://github.com/rEinve/appai-assistant.git
-cd appai-assistant
-npm ci
+npm install
 ```
 
-### 2. Configure the local environment
-
+### 2. Environment Configuration
+On first launch, the runner creates a private `.env` file if one does not exist. Ensure your database connection is specified:
 ```bash
-cp .env.example .env
-openssl rand -base64 48
-```
-
-Copy the generated value into `BETTER_AUTH_SECRET` in `.env`. For the included local Compose database, use these matching development-only settings:
-
-```bash
-APP_USE_DOCKER_DB=true
-POSTGRES_PASSWORD=appai-local-only
 DATABASE_URL=postgresql://appai:appai-local-only@127.0.0.1:5432/appai_dev
 ```
+*(Optional)* Add AI and payment keys for live sandbox testing:
+```bash
+GOOGLE_KEY=your_gemini_api_key                # Enables AI Concierge extraction
+PAYPAL_DEMO_MODE=sandbox                      # Enables PayPal sandbox testing
+PAYPAL_CLIENT_ID=your_paypal_client_id
+PAYPAL_CLIENT_SECRET=your_paypal_client_secret
+```
 
-Keep `PAYPAL_DEMO_MODE=fixture` for local use. Do not reuse the example database password or auth secret on an internet-facing server. For installed PostgreSQL, set `APP_USE_DOCKER_DB=false` and use that database's connection string instead.
-
-### 3. Start the local application
-
-`npm start` starts the local database if needed, applies migrations, builds and starts the API and worker, and serves the site:
-
+### 3. Run Development Environment
+Starts the API, applies PostgreSQL migrations, and launches the React 19 member site:
 ```bash
 npm start
 ```
+* **Member Website:** `http://localhost:4201`
+* **API Server:** `http://localhost:4200`
 
-* **Member website:** <http://localhost:4200>
-* **API health:** <http://localhost:4300/health>
-* **Hot-reload frontend:** `npm run dev` at <http://localhost:4201> (the API must also be running on port 4300).
-
-### 4. Invite your first member
-
-Enrollment is invite-only. Generate a one-use code for the email address that will sign up:
-
+### 4. Create an Invite Code
+Apas enforces invite-only member enrollment. Generate a one-time invitation code:
 ```bash
 npm run invite:member -- --email=you@example.com
 ```
-
-Enter the code on the sign-up screen and share it privately. It expires after seven days. The local Compose database can be stopped with `docker compose stop db`; its data volume remains in place.
-
-For production installation, HTTPS, Nginx, persistent services, database backups, environment variables, and capability limits, follow the [self-hosting and deployment guide](docs/SELF-HOSTING.md).
+Use the output code on the web sign-up screen.
 
 ---
 
@@ -164,7 +144,13 @@ npm run test:paypal        # PayPal Orders v2 contract tests with local fetch st
 * **[Schema Specification](docs/A-P-P-A-I-agent-schema.md)**: Database tables, constraints, and migrations.
 * **[Development Acceptance Matrix](docs/DEVELOPMENT-ACCEPTANCE.md)**: Requirement-linked verification scenarios.
 * **[Work Status Log](docs/WORK-STATUS.md)**: Active implementation proof and milestone status.
-* **[Self-hosting & deployment guide](docs/SELF-HOSTING.md)**: Clone, install, configure, run locally, deploy on one Ubuntu VPS, update, back up, and troubleshoot.
-* **[License](LICENSE)**: MIT License.
 
-The MIT license applies to the AppAI project software and first-party documentation. AppAI is free to use; hosting, domains, database services, and optional third-party API usage may have costs.
+### Marketing & Launch Distribution Kit
+* **[Marketing Kit Overview](marketing/README.md)**: Central marketing index and distribution guide.
+* **[Official Elevator Pitches](marketing/ELEVATOR_PITCH.md)**: 10s, 30s, and 60s pitch tiers and competitive soundbites.
+* **[3-Minute Demo Video Script](marketing/DEMO_VIDEO_SCRIPT_3MIN.md)**: Fast-paced 180-second product walkthrough tutorial formatted for Bandicam recording.
+* **[1-Month Master Editorial Calendar (CSV)](marketing/EDITORIAL_CALENDAR_MONTH_1.csv)**: 44-row Excel/Sheets calendar (12 blog posts, 28 daily FB/IG posts, 4 YouTube videos).
+* **[Master Editorial Handbook](marketing/EDITORIAL_CALENDAR_GUIDE.md)**: Outlines for all 12 articles and 4 YouTube video blueprints.
+* **[SEO Keyword & Workload Strategy](marketing/SEO_KEYWORD_STRATEGY.md)**: 4 target keyword clusters and monthly production hours.
+* **[Brand Positioning & Messaging Guide](marketing/POSITIONING_AND_MESSAGING.md)**: Personas, elevator pitches, and FAQs.
+* **[Multi-Channel Social Media Kit](marketing/SOCIAL_MEDIA_KIT.md)**: X/Twitter launch thread, LinkedIn post, and Product Hunt / HN templates.

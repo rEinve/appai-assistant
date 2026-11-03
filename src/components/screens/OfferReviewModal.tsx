@@ -146,7 +146,7 @@ function OfferReviewModalContent({
             <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-2 text-xs text-rose-900">
               <Icon name="warning" />
               <span>
-                <strong>Offer Declined:</strong> This offer was declined. APPAI
+                <strong>Offer Declined:</strong> This offer was declined. Apas
                 will continue tracking other sources within your criteria.
               </span>
             </div>

@@ -87,7 +87,7 @@ export function Navigation({
         onClick={onLogo}
       >
         <BrandMark />
-        <span className="brand__name">appai</span>
+        <span className="brand__name">Apas</span>
       </button>
 
       <Button icon="add" onClick={() => onChange("New instruction")}>

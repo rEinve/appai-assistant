@@ -127,6 +127,22 @@ The updated APPAI web client was compiled from checkpoint commit `6a09928` (`Add
   - `GET /api/v1/operator/pilot-readiness` — HTTP/2 401 unauthenticated protection verified.
   - Nginx reloaded cleanly; `appai-api.service` and `appai-worker.service` active and operational.
 
+### Production Web Client & Rebranding Deployment Update — 4 November 2026
+
+The Apas web client, UI prototype sandbox, and discovery metadata were compiled and verified for production deployment to `https://appia.intelliweblab.com/`:
+- **Apas Rebranding & Discovery Metadata**: Synchronized public identity from APPAI to **Apas** (pronounced "Appas") across the main application (`src/App.tsx`, `index.html`), SVG vector assets (`appai-logo.svg`, `public/appai-logo.svg`, `src/assets/appai-logo.svg`), prototype sandbox (`prototype/index.html`), `public/llms.txt`, and crawler discovery files (`public/sitemap.xml` updated to `<lastmod>2026-11-04</lastmod>`).
+- **Surface Refinement & Design Tokens**: Adjusted `src/index.css` design tokens (`--color-primary-deep: #002A7A`) and transitioned `.control-section`, `.security-section`, and `.landing-cta` to light theme card surfaces (`var(--color-surface)` and `var(--color-ink)`) with brand ring accents.
+- **5-Step Pre-Flight Verification Gate (`.agents/skills/five-final-checklist/SKILL.md`)**:
+  - Step 1 (Tokens & Hygiene): Design tokens strictly maintained; raw styling prohibited.
+  - Step 2 (A11y & Semantics): 100% static WCAG 2.1 AA compliance verified on compiled distribution HTML across root and prototype (`dist/appai-website/index.html` and `dist/appai-website/prototype/index.html` report 1 unique title tag, clean heading hierarchy, and zero empty links).
+  - Step 3 (Motion & Transitions): Hardware-accelerated transforms with strict `@media (prefers-reduced-motion: reduce)` overrides.
+  - Step 4 (SEO & Discovery): Prerendered landing HTML, canonical URL (`https://appia.intelliweblab.com/`), OpenGraph/Twitter cards, and Schema.org JSON-LD verified.
+  - Step 5 (Build & Regression Gate):
+    - `npm run build` emitted clean distribution bundle: 425.87 kB JS, 95.78 kB CSS, prerendered index HTML, and `/prototype/` standalone sandbox.
+    - `npm run build:api` and `npm run build:worker` compiled with 0 errors.
+    - Full test suite verified: `npm run test:domain` (11/11 pass), `npm run test:paypal` (3/3 pass), `npm run test:acceptance` (101/101 pass).
+    - Safety gate: `liveExecutionEnabled: false` remains strictly enforced.
+
 ## M5 Implementation Status
 
 **M5 is GREEN-LIT in local PostgreSQL and deterministic fixture mode.** Live execution remains disabled; production TLS, email delivery/recovery, and live provider capability evidence remain open.
