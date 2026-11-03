@@ -101,7 +101,7 @@ The production deployment preparation sequence and mandatory 5-step pre-flight v
 - Updated `public/llms.txt` to describe the member-facing product and invite-only access; limited `public/sitemap.xml` to the public homepage.
 - Verification: `npm run build` passed on 2 November 2026; generated `dist/appai-website/index.html` contains the prerendered landing content. Automated and assistive-technology accessibility checks, real-user performance metrics, and post-change live HTTP/social-card checks remain to be run as part of deployment verification.
 
-## Production Deployment — Completed 2 November 2026
+## Production Deployment — Completed 2 November 2026 (Updated 3 November 2026)
 
 The full A-P-P-A-I stack was deployed and verified at `https://appia.intelliweblab.com/`. Host addresses, filesystem paths, certificate paths, webhook identifiers, and operator email addresses are intentionally omitted from this public report.
 - **PostgreSQL 16**: Dedicated database and role configured; migrations 001–018 applied.
@@ -110,6 +110,21 @@ The full A-P-P-A-I stack was deployed and verified at `https://appia.intelliwebl
 - **Reverse proxy**: Nginx served the application and proxied `/api/` and `/health` to the API over TLS.
 - **Live verification**: Homepage, `/health`, `/robots.txt`, `/sitemap.xml`, and `/llms.txt` returned HTTP 200; `/api/v1/operator/pilot-readiness` returned HTTP 401 when unauthenticated. The health response reported `liveExecutionEnabled: false`.
 - **Enrollment**: An initial operator invitation was generated. Recipient details and invitation codes are not included in this report.
+
+### Production Web Client Deployment Update — 3 November 2026
+
+The updated APPAI web client was compiled from checkpoint commit `6a09928` (`Add calendar views to Planner`) and deployed to `https://appia.intelliweblab.com/`:
+- **Pre-deployment Safety Backup**: Remote bundle archived to `/home/ubuntu/backups/appai-website-backup-20261103_013133.tar.gz`.
+- **Public Splash & SEO Prerendering**: Production HTML contains prerendered landing structure, APPAI branding metadata, hydration entry point, and updated crawler discovery endpoints (`/llms.txt`, `/robots.txt`, `/sitemap.xml`).
+- **Planner Calendar Views**: Deployed interactive Month and Week projection views, schedule matrix, and day-budget navigation.
+- **Static A11y Gate**: 100% WCAG 2.1 AA static scan verified (single H1, unique titles, no empty links).
+- **Multi-Endpoint Live Verification (3 November 2026)**:
+  - `GET /` — HTTP/2 200 (prerendered HTML served, `no-store, no-cache` document caching).
+  - `GET /health` — HTTP/2 200 (`{"status":"ok","paypalMode":"fixture","memberAuthAvailable":true,"liveExecutionEnabled":false}`).
+  - `GET /robots.txt`, `GET /sitemap.xml`, `GET /llms.txt` — HTTP/2 200.
+  - `GET /assets/index-DCepgSzR.js`, `GET /assets/index-DhDzDe3i.css` — HTTP/2 200 with `public, max-age=31536000, immutable` and `nosniff`.
+  - `GET /api/v1/operator/pilot-readiness` — HTTP/2 401 unauthenticated protection verified.
+  - Nginx reloaded cleanly; `appai-api.service` and `appai-worker.service` active and operational.
 
 ## M5 Implementation Status
 
