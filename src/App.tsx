@@ -255,35 +255,14 @@ function Landing({
       <section className="control-section" id="control">
         <div className="control-copy">
           <span className="landing-kicker">
-            <Icon name="shield" /> Built around permission
+            <Icon name="shield" /> Authority at every step
           </span>
-          <h2>Automation without the black box.</h2>
+          <h2>Procurement, within your authority.</h2>
           <p>
-            Every instruction carries an authority mode, stop rule, current
-            operation, and next check. Pause or revoke it whenever you want.
+            Every instruction has clear limits, a stop rule, and a next check.
           </p>
-          <ul>
-            <li>
-              <Icon name="check_circle" />
-              <span>
-                <strong>Review required</strong> before a provider action
-              </span>
-            </li>
-            <li>
-              <Icon name="check_circle" />
-              <span>
-                <strong>Pre-approved</strong> only within agreed boundaries
-              </span>
-            </li>
-            <li>
-              <Icon name="check_circle" />
-              <span>
-                <strong>Notify only</strong> when you just want the research
-              </span>
-            </li>
-          </ul>
           <Button variant="tonal" onClick={onEnter}>
-            See supported pages
+            Open workspace
           </Button>
         </div>
         <div className="authority-panel">
@@ -356,11 +335,11 @@ function Landing({
 
       <section className="landing-cta">
         <BrandMark />
-        <h2>Ready to make procurement feel lighter?</h2>
+        <h2>Your procurement, under your control.</h2>
         <p>
           {isAuthenticated
-            ? "Your personal procurement workspace is ready."
-            : "APPAI is currently invitation-only. Sign in or enter your invitation code to access your workspace."}
+            ? "Your workspace is ready."
+            : "Invitation-only access. Sign in or redeem an invite to continue."}
         </p>
         <Button
           icon="arrow_forward"

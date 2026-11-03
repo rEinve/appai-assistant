@@ -9,6 +9,8 @@
   --color-ink: #0b1426;
   --color-ink-muted: #5b677b;
   --color-primary: #003aa8;
+  --color-primary-deep: #061b48;
+  --color-primary-deep-surface: #0d3274;
   --color-primary-container: #e3ecff;
   --color-on-primary: #ffffff;
   --color-tertiary: #003aa8;
@@ -3375,6 +3377,166 @@
   height: 52px;
   border-radius: 14px;
   box-shadow: 0 10px 24px color-mix(in srgb, var(--color-primary) 22%, transparent);
+}
+
+/* Deep blue feature bands keep the existing brand color and give the page a
+   stronger visual anchor without adding motion or decorative noise. */
+.control-section {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.9fr);
+  gap: clamp(48px, 8vw, 112px);
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  background: var(--color-primary-deep);
+  color: var(--color-on-primary);
+  padding: 112px max(24px, calc((100vw - 1180px) / 2));
+}
+
+.control-section::before {
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  right: -13rem;
+  width: min(74vw, 860px);
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in srgb, var(--color-primary-container) 20%, transparent);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 54px color-mix(in srgb, var(--color-primary-container) 5%, transparent),
+    0 0 0 108px color-mix(in srgb, var(--color-primary-container) 3%, transparent);
+  content: "";
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.control-copy,
+.authority-panel {
+  position: relative;
+  z-index: 1;
+}
+
+.control-copy h2 {
+  max-width: 620px;
+  font-size: clamp(44px, 5.8vw, 72px);
+  text-wrap: balance;
+}
+
+.control-copy > p {
+  max-width: 470px;
+  color: color-mix(in srgb, var(--color-on-primary) 78%, transparent);
+  text-wrap: pretty;
+}
+
+.control-section .authority-panel {
+  border: 1px solid color-mix(in srgb, var(--color-on-primary) 22%, transparent);
+  background: color-mix(in srgb, var(--color-primary-deep-surface) 82%, var(--color-primary-deep));
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--color-primary-deep) 36%, transparent);
+}
+
+.control-section .authority-panel > .eyebrow {
+  color: color-mix(in srgb, var(--color-on-primary) 78%, transparent);
+}
+
+.control-section .authority-option:first-of-type {
+  border-color: var(--color-primary);
+}
+
+.control-section :focus-visible,
+.landing-cta :focus-visible {
+  outline-color: var(--color-primary-container);
+}
+
+.landing-cta {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  overflow: hidden;
+  border-top: 1px solid color-mix(in srgb, var(--color-primary-container) 18%, transparent);
+  background: var(--color-primary-deep);
+  color: var(--color-on-primary);
+  padding: 104px 24px;
+}
+
+.landing-cta::before {
+  position: absolute;
+  z-index: 0;
+  top: -80%;
+  left: 50%;
+  width: min(84vw, 900px);
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in srgb, var(--color-primary-container) 16%, transparent);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 56px color-mix(in srgb, var(--color-primary-container) 4%, transparent),
+    0 0 0 112px color-mix(in srgb, var(--color-primary-container) 2%, transparent);
+  content: "";
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.landing-cta > * {
+  position: relative;
+  z-index: 1;
+}
+
+.landing-cta h2 {
+  max-width: 720px;
+  text-wrap: balance;
+}
+
+.landing-cta p {
+  color: color-mix(in srgb, var(--color-on-primary) 78%, transparent);
+  text-wrap: pretty;
+}
+
+.landing-cta .button--filled {
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+}
+
+.landing-cta .button--filled:hover {
+  background: var(--color-on-primary);
+}
+
+@media (max-width: 780px) {
+  .control-section {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 48px;
+    padding-block: 84px;
+  }
+
+  .control-section::before {
+    top: 60%;
+    right: -24rem;
+    width: 700px;
+  }
+
+  .landing-cta {
+    padding-block: 88px;
+  }
+}
+
+@media (max-width: 460px) {
+  .control-section {
+    padding-inline: 22px;
+  }
+
+  .control-section .authority-panel {
+    padding: 20px;
+  }
+
+  .control-section .authority-option {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .landing-cta {
+    padding-inline: 20px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
