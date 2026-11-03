@@ -23,6 +23,7 @@ Baseline: **v1.1, 2 November 2026**. The React 19 + Vite web application, Postgr
 14. [M4 mobile control, cancellation, and operational recovery](M4%20Mobile%20Control%20Cancellation%20and%20Operational%20Recovery%20Plan.md): implementation report and dated local fixture verification for `AC-13`–`AC-16`; external push, provider cancellation, and live execution remain disabled.
 15. [M5 supported first-release acceptance and pilot readiness](M5%20Supported%20First-Release%20Acceptance%20and%20Pilot%20Readiness%20Plan.md): retention, append-only financial/audit history, step-up authentication, account deactivation, backup/restore, quantitative acceptance and pilot readiness.
 16. [M5 pilot readiness and operations runbook](M5-PILOT-READINESS-AND-OPERATIONS-RUNBOOK.md): capability status, environment inventory, backup/restore, incident response and pilot gate.
+17. [Self-hosting and deployment guide](SELF-HOSTING.md): clone, configure, run locally, deploy on a single Ubuntu VPS, update, back up and troubleshoot.
 
 The PRD owns behavior, the technical document owns execution/state/API contracts, and the schema implements them. When they conflict, fix the owning specification and affected consumers together; a coding agent must not resolve a payment-authority conflict by guessing. A missing vendor capability returns unsupported/blocked rather than silently introducing browser checkout or another payment provider.
 

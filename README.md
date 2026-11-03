@@ -82,41 +82,57 @@ flowchart TD
 ## 5. Local Setup & Quickstart
 
 ### Prerequisites
-* **Node.js** 22.9+
-* **PostgreSQL** running locally (e.g., `postgresql://127.0.0.1:5432/appai_dev` or via Docker Compose)
+* **Node.js** 22.12 or newer (Node 24 LTS is also supported by Vite 8).
+* **npm**, installed with Node.js.
+* **PostgreSQL 16** locally, or Docker Compose to start the included PostgreSQL-only service.
 
-### 1. Install Dependencies
+### 1. Clone and install
 ```bash
-npm install
+git clone https://github.com/rEinve/appai-assistant.git
+cd appai-assistant
+npm ci
 ```
 
-### 2. Environment Configuration
-On first launch, the runner creates a private `.env` file if one does not exist. Ensure your database connection is specified:
+### 2. Configure the local environment
+
 ```bash
+cp .env.example .env
+openssl rand -base64 48
+```
+
+Copy the generated value into `BETTER_AUTH_SECRET` in `.env`. For the included local Compose database, use these matching development-only settings:
+
+```bash
+APP_USE_DOCKER_DB=true
+POSTGRES_PASSWORD=appai-local-only
 DATABASE_URL=postgresql://appai:appai-local-only@127.0.0.1:5432/appai_dev
 ```
-*(Optional)* Add AI and payment keys for live sandbox testing:
-```bash
-GOOGLE_KEY=your_gemini_api_key                # Enables AI Concierge extraction
-PAYPAL_DEMO_MODE=sandbox                      # Enables PayPal sandbox testing
-PAYPAL_CLIENT_ID=your_paypal_client_id
-PAYPAL_CLIENT_SECRET=your_paypal_client_secret
-```
 
-### 3. Run Development Environment
-Starts the API, applies PostgreSQL migrations, and launches the React 19 member site:
+Keep `PAYPAL_DEMO_MODE=fixture` for local use. Do not reuse the example database password or auth secret on an internet-facing server. For installed PostgreSQL, set `APP_USE_DOCKER_DB=false` and use that database's connection string instead.
+
+### 3. Start the local application
+
+`npm start` starts the local database if needed, applies migrations, builds and starts the API and worker, and serves the site:
+
 ```bash
 npm start
 ```
-* **Member Website:** `http://localhost:4201`
-* **API Server:** `http://localhost:4200`
 
-### 4. Create an Invite Code
-AppAI enforces invite-only member enrollment. Generate a one-time invitation code:
+* **Member website:** <http://localhost:4200>
+* **API health:** <http://localhost:4300/health>
+* **Hot-reload frontend:** `npm run dev` at <http://localhost:4201> (the API must also be running on port 4300).
+
+### 4. Invite your first member
+
+Enrollment is invite-only. Generate a one-use code for the email address that will sign up:
+
 ```bash
 npm run invite:member -- --email=you@example.com
 ```
-Use the output code on the web sign-up screen.
+
+Enter the code on the sign-up screen and share it privately. It expires after seven days. The local Compose database can be stopped with `docker compose stop db`; its data volume remains in place.
+
+For production installation, HTTPS, Nginx, persistent services, database backups, environment variables, and capability limits, follow the [self-hosting and deployment guide](docs/SELF-HOSTING.md).
 
 ---
 
@@ -144,6 +160,10 @@ npm run test:paypal        # PayPal Orders v2 contract tests with local fetch st
 * **[Schema Specification](docs/A-P-P-A-I-agent-schema.md)**: Database tables, constraints, and migrations.
 * **[Development Acceptance Matrix](docs/DEVELOPMENT-ACCEPTANCE.md)**: Requirement-linked verification scenarios.
 * **[Work Status Log](docs/WORK-STATUS.md)**: Active implementation proof and milestone status.
+* **[Self-hosting & deployment guide](docs/SELF-HOSTING.md)**: Clone, install, configure, run locally, deploy on one Ubuntu VPS, update, back up, and troubleshoot.
+* **[License](LICENSE)**: MIT License.
+
+The MIT license applies to the AppAI project software and first-party documentation. The HubSpot-named template documents in `marketing/` may have separate source terms and are not relicensed by this project license; check their original terms before reuse or redistribution. AppAI itself is free to use, while hosting, domains, database services, and optional third-party API usage may have costs.
 
 ### Marketing & Launch Distribution Kit
 * **[Marketing Kit Overview](marketing/README.md)**: Central marketing index and distribution guide.
